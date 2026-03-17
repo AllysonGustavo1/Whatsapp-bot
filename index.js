@@ -157,6 +157,7 @@ function getVPSChromeConfig() {
 
   const candidates = [
     forcedPath,
+    "/snap/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
     "/usr/bin/google-chrome-stable",
@@ -182,10 +183,12 @@ function getVPSChromeConfig() {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
+      "--disable-software-rasterizer",
       "--disable-extensions",
+      "--no-first-run",
+      "--no-default-browser-check",
       "--disable-background-networking",
-      "--no-zygote",
-      "--single-process",
+      "--remote-debugging-port=0",
       "--window-size=1366,768",
     ],
   };
@@ -220,6 +223,7 @@ function getOpenWaConfig() {
     puppeteerOptions: {
       executablePath: vpsChrome.executablePath,
       args: vpsChrome.browserArgs,
+      timeout: 120000,
     },
   };
 }
