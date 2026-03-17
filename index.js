@@ -218,7 +218,7 @@ function getOpenWaConfig() {
     popup: false,
   };
 
-  const isVPSLinux = process.platform === "linux" && !process.env.DISPLAY;
+  const isVPSLinux = process.platform === "linux";
   if (!isVPSLinux) return base;
 
   console.log(
