@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "setup:vps": "bash ./scripts/install-vps.sh",
-    "start:vps": "CHROME_PATH=/usr/bin/google-chrome-stable node index.js"
+    "start:vps": "CHROME_PATH=${CHROME_PATH:-$(command -v chromium-browser || command -v chromium || command -v google-chrome-stable)} node index.js"
   },
   "dependencies": {
     "@open-wa/wa-automate": "^4.76.0",

@@ -150,34 +150,42 @@ async function start(client) {
 }
 
 function getVPSChromeConfig() {
+  const forcedPath =
+    process.env.CHROME_PATH ||
+    process.env.PUPPETEER_EXECUTABLE_PATH ||
+    "/usr/bin/chromium-browser";
+
   const candidates = [
-    process.env.CHROME_PATH,
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
+    forcedPath,
     "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
-  ].filter(Boolean);
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+  ];
 
   const executablePath = candidates.find((bin) => fs.existsSync(bin)) || null;
 
-  if (executablePath) {
-    console.log(`🔧 Browser detectado: ${executablePath}`);
-  } else {
-    console.log("⚠️ Nenhum Chrome/Chromium detectado no Linux.");
+  if (!executablePath) {
+    throw new Error(
+      "Nenhum Chrome/Chromium encontrado. Defina CHROME_PATH para o binário correto.",
+    );
   }
+
+  console.log(`🔧 Browser forçado: ${executablePath}`);
 
   return {
     useChrome: true,
     executablePath,
-    browserRevision: null,
     browserArgs: [
-      "--headless=new",
+      "--headless",
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--disable-extensions",
       "--disable-background-networking",
+      "--no-zygote",
+      "--single-process",
       "--window-size=1366,768",
     ],
   };
