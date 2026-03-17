@@ -208,9 +208,19 @@ function getOpenWaConfig() {
   console.log(
     "🐧 Ambiente VPS Linux detectado. Aplicando configuração de browser.",
   );
+
+  const vpsChrome = getVPSChromeConfig();
+  process.env.CHROME_PATH = vpsChrome.executablePath;
+  process.env.PUPPETEER_EXECUTABLE_PATH = vpsChrome.executablePath;
+  process.env.PUPPETEER_SKIP_DOWNLOAD = "true";
+
   return {
     ...base,
-    ...getVPSChromeConfig(),
+    ...vpsChrome,
+    puppeteerOptions: {
+      executablePath: vpsChrome.executablePath,
+      args: vpsChrome.browserArgs,
+    },
   };
 }
 
