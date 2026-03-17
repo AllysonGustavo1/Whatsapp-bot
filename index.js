@@ -1,7 +1,11 @@
 const { create } = require("@open-wa/wa-automate");
-const { criarMembro } = require("./CaucauShowGenerator");
+const { criarMembro } = require("./CacauShowGenerator");
+const fs = require("fs");
+const path = require("path");
 
 const PREFIX = "/";
+const SALVAR_REQUISICOES_TXT = true;
+const COMMAND_STATUS_FILE = path.join(__dirname, "comandos-status.txt");
 const runningByChat = new Set();
 
 const COMMANDS = {
@@ -9,15 +13,61 @@ const COMMANDS = {
   cacaushow: ["cacaushow"],
 };
 
-const HELP_MESSAGE = [
-  "🤖 *Allysongs Bot*",
-  "",
-  "Comandos disponíveis:",
-  "• /help",
-  "• /ajuda",
-  "• /comandos",
-  "• /cacaushow",
-].join("\n");
+function parseStatus(value = "") {
+  const normalized = String(value).trim().toLowerCase();
+  return ["on", "ativo", "ligado", "true", "1"].includes(normalized);
+}
+
+function getCommandStatus() {
+  const defaults = {
+    help: true,
+    cacaushow: true,
+  };
+
+  try {
+    if (!fs.existsSync(COMMAND_STATUS_FILE)) {
+      return defaults;
+    }
+
+    const raw = fs.readFileSync(COMMAND_STATUS_FILE, "utf8");
+    const lines = raw.split(/\r?\n/);
+    const result = { ...defaults };
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      const [nameRaw, statusRaw] = trimmed.includes("=")
+        ? trimmed.split("=")
+        : trimmed.split(":");
+
+      const name = String(nameRaw || "")
+        .trim()
+        .toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(result, name)) continue;
+
+      result[name] = parseStatus(statusRaw);
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Erro ao ler comandos-status.txt:", error.message);
+    return defaults;
+  }
+}
+
+function buildHelpMessage(status) {
+  const label = (isOn) => (isOn ? "✅ ativo" : "⛔ desligado");
+  return [
+    "🤖 *Allysongs Bot*",
+    "",
+    "Comandos disponíveis:",
+    `/help - ${label(status.help)}`,
+    `/ajuda - ${label(status.help)}`,
+    `/comandos - ${label(status.help)}`,
+    `/cacaushow - ${label(status.cacaushow)}`,
+  ].join("\n");
+}
 
 function normalizeCommand(text = "") {
   return text.trim().toLowerCase().replace(/^\//, "");
@@ -41,13 +91,22 @@ async function start(client) {
   client.onMessage(async (message) => {
     try {
       const content = message.body || "";
+      const commandStatus = getCommandStatus();
 
-      if (isHelpCommand(content)) {
-        await client.sendText(message.from, HELP_MESSAGE);
+      if (isHelpCommand(content) && commandStatus.help) {
+        await client.sendText(message.from, buildHelpMessage(commandStatus));
         return;
       }
 
-      if (isCacauShowCommand(content)) {
+      if (isCacauShowCommand(content) && !commandStatus.cacaushow) {
+        await client.sendText(
+          message.from,
+          "⛔ O comando /cacaushow está desligado no momento.",
+        );
+        return;
+      }
+
+      if (isCacauShowCommand(content) && commandStatus.cacaushow) {
         if (runningByChat.has(message.from)) {
           await client.sendText(
             message.from,
@@ -64,6 +123,7 @@ async function start(client) {
 
         try {
           const resultado = await criarMembro({
+            salvarRequisicoesTxt: SALVAR_REQUISICOES_TXT,
             onOutput: async (texto) => {
               await client.sendText(message.from, String(texto));
             },
@@ -71,11 +131,7 @@ async function start(client) {
 
           await client.sendText(
             message.from,
-            [
-              "✅ Fluxo finalizado.",
-              `Código: ${resultado.experienciaMembroId || "N/A"}`,
-              `Validade: ${resultado.validade || "N/A"}`,
-            ].join("\n"),
+            ["✅ Fluxo finalizado."].join("\n"),
           );
         } catch (error) {
           console.error("Erro no /cacaushow:", error);
@@ -93,14 +149,64 @@ async function start(client) {
   });
 }
 
-create({
-  sessionId: "allysongs-bot",
-  multiDevice: true,
-  qrTimeout: 0,
-  authTimeout: 0,
-  headless: true,
-  logConsole: true,
-})
+function getVPSChromeConfig() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+  ].filter(Boolean);
+
+  const executablePath = candidates.find((bin) => fs.existsSync(bin)) || null;
+
+  if (executablePath) {
+    console.log(`🔧 Browser detectado: ${executablePath}`);
+  } else {
+    console.log("⚠️ Nenhum Chrome/Chromium detectado no Linux.");
+  }
+
+  return {
+    useChrome: true,
+    executablePath,
+    browserRevision: null,
+    browserArgs: [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-extensions",
+      "--disable-background-networking",
+      "--window-size=1366,768",
+    ],
+  };
+}
+
+function getOpenWaConfig() {
+  const base = {
+    sessionId: "allysongs-bot",
+    multiDevice: true,
+    qrTimeout: 0,
+    authTimeout: 0,
+    headless: true,
+    logConsole: true,
+    popup: false,
+  };
+
+  const isVPSLinux = process.platform === "linux" && !process.env.DISPLAY;
+  if (!isVPSLinux) return base;
+
+  console.log(
+    "🐧 Ambiente VPS Linux detectado. Aplicando configuração de browser.",
+  );
+  return {
+    ...base,
+    ...getVPSChromeConfig(),
+  };
+}
+
+create(getOpenWaConfig())
   .then(start)
   .catch((error) => {
     console.error("❌ Falha ao iniciar o bot:", error);

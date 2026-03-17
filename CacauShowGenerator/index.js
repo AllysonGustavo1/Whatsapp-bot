@@ -7,6 +7,7 @@ const {
   gerarTelefoneAleatorio,
   gerarEmailMailTm,
   aguardarCodigoEmailMailTm,
+  salvarRespostasEmTxt,
 } = require("./funcoes");
 
 const API_HEADERS = globalThis.API_HEADERS || {
@@ -27,10 +28,17 @@ const API_HEADERS = globalThis.API_HEADERS || {
 const SENHA = "Zelele123@";
 const CODIGO_EMAIL = globalThis.CODIGO_EMAIL || null;
 const TOKEN_RESGATE = globalThis.TOKEN_RESGATE || globalThis.TOKEN;
-const EXPERIENCIA_ID = globalThis.EXPERIENCIA_ID || 4337;
-const OFERTA_ID = globalThis.OFERTA_ID || 10148;
+const EXPERIENCIA_ID = globalThis.EXPERIENCIA_ID || 2011;
+const OFERTA_ID = globalThis.OFERTA_ID || 8265;
+const SALVAR_REQUISICOES_TXT = globalThis.SALVAR_REQUISICOES_TXT || false;
+const PASTA_LOGS_REQUISICOES_TXT =
+  globalThis.PASTA_LOGS_REQUISICOES_TXT || "./logs-requisicoes";
 
-async function criarMembro({ onOutput } = {}) {
+async function criarMembro({
+  onOutput,
+  salvarRequisicoesTxt = SALVAR_REQUISICOES_TXT,
+  pastaLogsTxt = PASTA_LOGS_REQUISICOES_TXT,
+} = {}) {
   const emitir = async (texto) => {
     if (typeof onOutput === "function") {
       await onOutput(texto);
@@ -48,7 +56,13 @@ async function criarMembro({ onOutput } = {}) {
   await emitir(`Senha: ${SENHA}`);
   await emitir(`E-mail(mail.tm): ${EMAIL}`);
 
-  const resultado = await CriacaoDeContaCompleta({
+  const resultado = {};
+  const salvarParcial = () => {
+    if (!salvarRequisicoesTxt) return;
+    salvarRespostasEmTxt(resultado, pastaLogsTxt);
+  };
+
+  const resultadoConta = await CriacaoDeContaCompleta({
     apiHeaders: API_HEADERS,
     nome: NOME,
     email: EMAIL,
@@ -62,7 +76,23 @@ async function criarMembro({ onOutput } = {}) {
       });
       return codigo;
     },
+    onEtapa: (etapa, dados) => {
+      if (etapa === "criacao") {
+        resultado.criacao = dados;
+        resultado.documento = dados?.documento || resultado.documento;
+      } else if (etapa === "envioCodigo") {
+        resultado.envioCodigo = dados;
+      } else if (etapa === "validacaoCodigo") {
+        resultado.validacaoCodigo = dados;
+      }
+      salvarParcial();
+    },
   });
+
+  Object.assign(resultado, resultadoConta);
+  salvarParcial();
+
+  await emitir(`CPF: ${resultado.documento}`);
 
   const obterPorDocEmail = await obterPorDocumentoEmail({
     apiHeaders: API_HEADERS,
@@ -70,6 +100,7 @@ async function criarMembro({ onOutput } = {}) {
     documento: "",
   });
   resultado.obterPorDocumentoEmail = obterPorDocEmail;
+  salvarParcial();
 
   const authEmail = await autenticarPorEmail({
     apiHeaders: API_HEADERS,
@@ -77,6 +108,7 @@ async function criarMembro({ onOutput } = {}) {
     senha: SENHA,
   });
   resultado.autenticacaoEmail = authEmail;
+  salvarParcial();
 
   const tokenResgateFinal = TOKEN_RESGATE || authEmail.token;
   const resultadoResgate = await fluxoResgateTrufa({
@@ -89,16 +121,19 @@ async function criarMembro({ onOutput } = {}) {
 
   resultado.resgateTrufa = resultadoResgate.resgate;
   resultado.listarMeusResgates = resultadoResgate.meusResgates;
+  salvarParcial();
 
   await emitir(`Codigo para resgate: ${resultadoResgate.experienciaMembroId}`);
   await emitir(`Validade: ${resultadoResgate.validade}`);
 
   return {
     nome: NOME,
+    cpf: resultado.documento,
     telefone: TELEFONE,
     senha: SENHA,
     email: EMAIL,
     resultado,
+    logsTxt: salvarRequisicoesTxt ? pastaLogsTxt : null,
     experienciaMembroId: resultadoResgate.experienciaMembroId,
     validade: resultadoResgate.validade,
   };

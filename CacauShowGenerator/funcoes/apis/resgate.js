@@ -17,8 +17,8 @@ function gerarIdempotenceKey() {
 async function resgatarTrufa({
   apiHeaders,
   token,
-  experienciaId = 4337,
-  ofertaId = 10148,
+  experienciaId = 2011,
+  ofertaId = 8265,
   quantidade = 1,
   parceiroEnderecoId = null,
   acompanhantes = [],
@@ -78,8 +78,8 @@ function obterExperienciaMembroIdEValidade(listaResgates) {
 async function fluxoResgateTrufa({
   apiHeaders,
   token,
-  experienciaId = 4337,
-  ofertaId = 10148,
+  experienciaId = 2011,
+  ofertaId = 8265,
   pagina = 1,
   quantidade = 1,
   parceiroEnderecoId = null,

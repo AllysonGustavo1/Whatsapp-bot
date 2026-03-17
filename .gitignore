@@ -6,3 +6,4 @@ _IGNORE_*/
 session.data.json
 .DS_Store
 Thumbs.db
+*.deb

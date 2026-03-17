@@ -12,6 +12,33 @@ const URL_AUTENTICACAO_POR_EMAIL =
   "https://apigatewaysitelovers.cacaushow.com.br/membrosite/api/autenticacoes/autenticacao-por-email";
 const URL_OBTER_POR_DOCUMENTO_EMAIL =
   "https://apigatewaysitelovers.cacaushow.com.br/membrosite/api/autenticacoes/obter-por-documento-email";
+const ANOS_REDUCAO_DATA_NASCIMENTO = 20;
+
+function getDataNascimentoOntemBrasil(
+  anosReducao = ANOS_REDUCAO_DATA_NASCIMENTO,
+) {
+  const agora = new Date();
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(agora);
+
+  const ano = Number(partes.find((p) => p.type === "year")?.value);
+  const mes = Number(partes.find((p) => p.type === "month")?.value);
+  const dia = Number(partes.find((p) => p.type === "day")?.value);
+
+  const dataBrasil = new Date(Date.UTC(ano, mes - 1, dia));
+  dataBrasil.setUTCDate(dataBrasil.getUTCDate() - 1);
+  dataBrasil.setUTCFullYear(dataBrasil.getUTCFullYear() - anosReducao);
+
+  const y = dataBrasil.getUTCFullYear();
+  const m = String(dataBrasil.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(dataBrasil.getUTCDate()).padStart(2, "0");
+
+  return `${y}-${m}-${d}T00:00:00.000-03:00`;
+}
 
 async function CriacaoDeConta({ apiHeaders, nome, email, senha, telefone }) {
   if (!apiHeaders) throw new Error("Os headers da API não foram definidos.");
@@ -23,7 +50,7 @@ async function CriacaoDeConta({ apiHeaders, nome, email, senha, telefone }) {
   const documento = gerarCPF();
   const membroPayload = {
     nome,
-    dataNascimento: "2000-03-01T03:00:00.000Z",
+    dataNascimento: getDataNascimentoOntemBrasil(),
     documento,
     email,
     idOrigem: 6,
