@@ -1,5 +1,6 @@
 const { create } = require("@open-wa/wa-automate");
 const { criarMembro } = require("./CacauShowGenerator");
+const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -151,24 +152,36 @@ async function start(client) {
 
 function getVPSChromeConfig() {
   const forcedPath =
-    process.env.CHROME_PATH ||
-    process.env.PUPPETEER_EXECUTABLE_PATH ||
-    "/usr/bin/chromium-browser";
+    process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
 
   const candidates = [
     forcedPath,
     "/snap/bin/chromium",
-    "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
-  ];
+  ].filter(Boolean);
 
-  const executablePath = candidates.find((bin) => fs.existsSync(bin)) || null;
+  const isUsableBrowser = (binPath) => {
+    if (!fs.existsSync(binPath)) return false;
+
+    const check = spawnSync(binPath, ["--version"], {
+      encoding: "utf8",
+      timeout: 10000,
+    });
+
+    const output = `${check.stdout || ""}\n${check.stderr || ""}`.toLowerCase();
+    const looksLikeBrowser =
+      output.includes("chromium") || output.includes("google chrome");
+    return check.status === 0 && looksLikeBrowser;
+  };
+
+  const executablePath = candidates.find((bin) => isUsableBrowser(bin)) || null;
 
   if (!executablePath) {
     throw new Error(
-      "Nenhum Chrome/Chromium encontrado. Defina CHROME_PATH para o binário correto.",
+      "Nenhum Chrome/Chromium válido encontrado. Instale Chromium e/ou defina CHROME_PATH com um binário funcional.",
     );
   }
 
