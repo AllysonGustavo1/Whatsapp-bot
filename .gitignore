@@ -1,0 +1,8 @@
+node_modules/
+*.log
+*.data.json
+_IGNORE_*/
+.session/
+session.data.json
+.DS_Store
+Thumbs.db

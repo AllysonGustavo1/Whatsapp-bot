@@ -1,0 +1,13 @@
+{
+  "name": "allysongs-bot",
+  "version": "1.0.0",
+  "description": "Bot de WhatsApp com comando de ajuda usando open-wa",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@open-wa/wa-automate": "^4.76.0",
+    "node-fetch": "^2.6.7"
+  }
+}
