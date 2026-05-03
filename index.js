@@ -1,5 +1,6 @@
 const { create } = require("@open-wa/wa-automate");
 const { criarMembro } = require("./CacauShowGenerator");
+const { encurtarLink } = require("./Encurtador");
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -12,6 +13,7 @@ const runningByChat = new Set();
 const COMMANDS = {
   help: ["help", "ajuda", "comandos"],
   cacaushow: ["cacaushow"],
+  encurtar: ["encurtar"],
 };
 
 function parseStatus(value = "") {
@@ -23,6 +25,7 @@ function getCommandStatus() {
   const defaults = {
     help: true,
     cacaushow: true,
+    encurtar: true,
   };
 
   try {
@@ -67,6 +70,7 @@ function buildHelpMessage(status) {
     `/ajuda - ${label(status.help)}`,
     `/comandos - ${label(status.help)}`,
     `/cacaushow - ${label(status.cacaushow)}`,
+    `/encurtar {link} - ${label(status.encurtar)}`,
   ].join("\n");
 }
 
@@ -86,6 +90,30 @@ function isCacauShowCommand(text = "") {
   return COMMANDS.cacaushow.includes(cmd);
 }
 
+function parseEncurtarCommand(text = "") {
+  if (!text.startsWith(PREFIX)) return null;
+  const trimmed = text.trim();
+  const [rawCmd, ...args] = trimmed.split(/\s+/);
+  const cmd = normalizeCommand(rawCmd);
+  if (!COMMANDS.encurtar.includes(cmd)) return null;
+
+  return {
+    originalUrl: args.join(" ").trim(),
+  };
+}
+
+function logRequest(message) {
+  const content = String(message?.body || "").trim();
+  if (!content.startsWith(PREFIX)) return;
+  console.log(`[REQ] ${message.from}: ${content}`);
+}
+
+async function sendTextWithLog(client, to, text) {
+  const output = String(text);
+  console.log(`[RES] ${to}: ${output}`);
+  return client.sendText(to, output);
+}
+
 async function start(client) {
   console.log("✅ Allysongs Bot iniciado com sucesso.");
 
@@ -93,23 +121,79 @@ async function start(client) {
     try {
       const content = message.body || "";
       const commandStatus = getCommandStatus();
+      const encurtarData = parseEncurtarCommand(content);
+
+      logRequest(message);
 
       if (isHelpCommand(content) && commandStatus.help) {
-        await client.sendText(message.from, buildHelpMessage(commandStatus));
+        await sendTextWithLog(
+          client,
+          message.from,
+          buildHelpMessage(commandStatus),
+        );
         return;
       }
 
       if (isCacauShowCommand(content) && !commandStatus.cacaushow) {
-        await client.sendText(
+        await sendTextWithLog(
+          client,
           message.from,
           "⛔ O comando /cacaushow está desligado no momento.",
         );
         return;
       }
 
+      if (encurtarData && !commandStatus.encurtar) {
+        await sendTextWithLog(
+          client,
+          message.from,
+          "⛔ O comando /encurtar está desligado no momento.",
+        );
+        return;
+      }
+
+      if (encurtarData && commandStatus.encurtar) {
+        if (!encurtarData.originalUrl) {
+          await sendTextWithLog(
+            client,
+            message.from,
+            "⚠️ Use: /encurtar {link}",
+          );
+          return;
+        }
+
+        try {
+          const { shortUrl } = await encurtarLink(encurtarData.originalUrl);
+          await sendTextWithLog(
+            client,
+            message.from,
+            `✅ Link encurtado: ${shortUrl}`,
+          );
+        } catch (error) {
+          const messageText = String(error?.message || "").toLowerCase();
+          if (messageText.includes("url")) {
+            await sendTextWithLog(
+              client,
+              message.from,
+              "❌ URL inválida. Envie um link começando com http:// ou https://",
+            );
+            return;
+          }
+          console.error("Erro no /encurtar:", error);
+          await sendTextWithLog(
+            client,
+            message.from,
+            "❌ Não foi possível encurtar o link agora. Tente novamente em instantes.",
+          );
+        }
+
+        return;
+      }
+
       if (isCacauShowCommand(content) && commandStatus.cacaushow) {
         if (runningByChat.has(message.from)) {
-          await client.sendText(
+          await sendTextWithLog(
+            client,
             message.from,
             "⏳ Já existe uma geração em andamento para este chat.",
           );
@@ -117,7 +201,8 @@ async function start(client) {
         }
 
         runningByChat.add(message.from);
-        await client.sendText(
+        await sendTextWithLog(
+          client,
           message.from,
           "🚀 Iniciando o gerador Cacau Show. Aguarde as próximas mensagens...",
         );
@@ -126,17 +211,19 @@ async function start(client) {
           const resultado = await criarMembro({
             salvarRequisicoesTxt: SALVAR_REQUISICOES_TXT,
             onOutput: async (texto) => {
-              await client.sendText(message.from, String(texto));
+              await sendTextWithLog(client, message.from, String(texto));
             },
           });
 
-          await client.sendText(
+          await sendTextWithLog(
+            client,
             message.from,
             ["✅ Fluxo finalizado."].join("\n"),
           );
         } catch (error) {
           console.error("Erro no /cacaushow:", error);
-          await client.sendText(
+          await sendTextWithLog(
+            client,
             message.from,
             "❌ Ocorreu um erro ao executar o gerador Cacau Show.",
           );
@@ -214,7 +301,7 @@ function getOpenWaConfig() {
     qrTimeout: 0,
     authTimeout: 0,
     headless: true,
-    logConsole: true,
+    logConsole: false,
     popup: false,
   };
 
