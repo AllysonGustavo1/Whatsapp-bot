@@ -1,20 +1,32 @@
-const { create } = require("@open-wa/wa-automate");
-const { criarMembro } = require("./CacauShowGenerator");
-const { encurtarLink } = require("./Encurtador");
-const { spawnSync } = require("child_process");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  isJidBroadcast,
+} = require("@whiskeysockets/baileys");
+const { criarMembro } = require("./Comandos/CacauShowGenerator");
+const { encurtarLink } = require("./Comandos/Encurtador");
+const { calcularCombustivel } = require("./Comandos/Fuel");
 const fs = require("fs");
 const path = require("path");
+const qrcode = require("qrcode-terminal");
+const pino = require("pino");
 
 const PREFIX = "/";
 const SALVAR_REQUISICOES_TXT = true;
 const COMMAND_STATUS_FILE = path.join(__dirname, "comandos-status.txt");
+const AUTH_FOLDER = path.join(__dirname, "auth_info_baileys");
 const runningByChat = new Set();
 
 const COMMANDS = {
   help: ["help", "ajuda", "comandos"],
   cacaushow: ["cacaushow"],
   encurtar: ["encurtar"],
+  fuel: ["fuel"],
 };
+
+// ─── Utilitários de status ────────────────────────────────────────────────────
 
 function parseStatus(value = "") {
   const normalized = String(value).trim().toLowerCase();
@@ -26,6 +38,7 @@ function getCommandStatus() {
     help: true,
     cacaushow: true,
     encurtar: true,
+    fuel: true,
   };
 
   try {
@@ -60,6 +73,8 @@ function getCommandStatus() {
   }
 }
 
+// ─── Mensagens ────────────────────────────────────────────────────────────────
+
 function buildHelpMessage(status) {
   const label = (isOn) => (isOn ? "✅ ativo" : "⛔ desligado");
   return [
@@ -71,8 +86,11 @@ function buildHelpMessage(status) {
     `/comandos - ${label(status.help)}`,
     `/cacaushow - ${label(status.cacaushow)}`,
     `/encurtar {link} - ${label(status.encurtar)}`,
+    `/fuel {p.gasolina} {p.etanol} {km/l gas} {km/l eta} - ${label(status.fuel)}`,
   ].join("\n");
 }
+
+// ─── Parsing de comandos ──────────────────────────────────────────────────────
 
 function normalizeCommand(text = "") {
   return text.trim().toLowerCase().replace(/^\//, "");
@@ -102,234 +120,277 @@ function parseEncurtarCommand(text = "") {
   };
 }
 
-function logRequest(message) {
-  const content = String(message?.body || "").trim();
-  if (!content.startsWith(PREFIX)) return;
-  console.log(`[REQ] ${message.from}: ${content}`);
+function parseFuelCommand(text = "") {
+  if (!text.startsWith(PREFIX)) return null;
+  const [rawCmd, ...args] = text.trim().split(/\s+/);
+  const cmd = normalizeCommand(rawCmd);
+  if (!COMMANDS.fuel.includes(cmd)) return null;
+
+  if (args.length < 4) return { incompleto: true };
+
+  const [precoGasolina, precoEtanol, kmLGasolina, kmLEtanol] = args.map(
+    (v) => parseFloat(v.replace(",", "."))
+  );
+
+  if ([precoGasolina, precoEtanol, kmLGasolina, kmLEtanol].some((n) => isNaN(n) || n <= 0)) {
+    return { invalido: true };
+  }
+
+  return { precoGasolina, precoEtanol, kmLGasolina, kmLEtanol };
 }
 
-async function sendTextWithLog(client, to, text) {
+// ─── Log e envio ─────────────────────────────────────────────────────────────
+
+function logRequest(from, content) {
+  if (!content.startsWith(PREFIX)) return;
+  console.log(`[REQ] ${from}: ${content}`);
+}
+
+async function sendTextWithLog(sock, to, text) {
   const output = String(text);
   console.log(`[RES] ${to}: ${output}`);
-  return client.sendText(to, output);
+  await sock.sendMessage(to, { text: output });
 }
 
-async function start(client) {
-  console.log("✅ Allysongs Bot iniciado com sucesso.");
+// ─── Handler de mensagens ─────────────────────────────────────────────────────
 
-  client.onMessage(async (message) => {
-    try {
-      const content = message.body || "";
-      const commandStatus = getCommandStatus();
-      const encurtarData = parseEncurtarCommand(content);
+async function handleMessage(sock, message) {
+  try {
+    // Ignora mensagens sem conteúdo, de broadcast ou enviadas pelo próprio bot
+    if (!message.message) return;
+    if (isJidBroadcast(message.key.remoteJid)) return;
+    if (message.key.fromMe) return;
 
-      logRequest(message);
+    const from = message.key.remoteJid;
 
-      if (isHelpCommand(content) && commandStatus.help) {
-        await sendTextWithLog(
-          client,
-          message.from,
-          buildHelpMessage(commandStatus),
-        );
+    // Extrai o texto da mensagem (suporta texto simples, extendedText e listResponseMessage)
+    const content =
+      message.message?.conversation ||
+      message.message?.extendedTextMessage?.text ||
+      message.message?.listResponseMessage?.title ||
+      "";
+
+    const commandStatus = getCommandStatus();
+    const encurtarData = parseEncurtarCommand(content);
+    const fuelData = parseFuelCommand(content, PREFIX, COMMANDS.fuel);
+
+    logRequest(from, content);
+
+    // /help /ajuda /comandos
+    if (isHelpCommand(content) && commandStatus.help) {
+      await sendTextWithLog(sock, from, buildHelpMessage(commandStatus));
+      return;
+    }
+
+    // /cacaushow desligado
+    if (isCacauShowCommand(content) && !commandStatus.cacaushow) {
+      await sendTextWithLog(
+        sock,
+        from,
+        "⛔ O comando /cacaushow está desligado no momento."
+      );
+      return;
+    }
+
+    // /encurtar desligado
+    if (encurtarData && !commandStatus.encurtar) {
+      await sendTextWithLog(
+        sock,
+        from,
+        "⛔ O comando /encurtar está desligado no momento."
+      );
+      return;
+    }
+
+    // /fuel desligado
+    if (fuelData && !commandStatus.fuel) {
+      await sendTextWithLog(
+        sock,
+        from,
+        "⛔ O comando /fuel está desligado no momento."
+      );
+      return;
+    }
+
+    // /encurtar {link}
+    if (encurtarData && commandStatus.encurtar) {
+      if (!encurtarData.originalUrl) {
+        await sendTextWithLog(sock, from, "⚠️ Use: /encurtar {link}");
         return;
       }
 
-      if (isCacauShowCommand(content) && !commandStatus.cacaushow) {
-        await sendTextWithLog(
-          client,
-          message.from,
-          "⛔ O comando /cacaushow está desligado no momento.",
-        );
-        return;
-      }
-
-      if (encurtarData && !commandStatus.encurtar) {
-        await sendTextWithLog(
-          client,
-          message.from,
-          "⛔ O comando /encurtar está desligado no momento.",
-        );
-        return;
-      }
-
-      if (encurtarData && commandStatus.encurtar) {
-        if (!encurtarData.originalUrl) {
+      try {
+        const { shortUrl } = await encurtarLink(encurtarData.originalUrl);
+        await sendTextWithLog(sock, from, `✅ Link encurtado: ${shortUrl}`);
+      } catch (error) {
+        const messageText = String(error?.message || "").toLowerCase();
+        if (messageText.includes("url")) {
           await sendTextWithLog(
-            client,
-            message.from,
-            "⚠️ Use: /encurtar {link}",
+            sock,
+            from,
+            "❌ URL inválida. Envie um link começando com http:// ou https://"
           );
           return;
         }
+        console.error("Erro no /encurtar:", error);
+        await sendTextWithLog(
+          sock,
+          from,
+          "❌ Não foi possível encurtar o link agora. Tente novamente em instantes."
+        );
+      }
 
-        try {
-          const { shortUrl } = await encurtarLink(encurtarData.originalUrl);
-          await sendTextWithLog(
-            client,
-            message.from,
-            `✅ Link encurtado: ${shortUrl}`,
-          );
-        } catch (error) {
-          const messageText = String(error?.message || "").toLowerCase();
-          if (messageText.includes("url")) {
-            await sendTextWithLog(
-              client,
-              message.from,
-              "❌ URL inválida. Envie um link começando com http:// ou https://",
-            );
-            return;
-          }
-          console.error("Erro no /encurtar:", error);
-          await sendTextWithLog(
-            client,
-            message.from,
-            "❌ Não foi possível encurtar o link agora. Tente novamente em instantes.",
-          );
-        }
+      return;
+    }
 
+    // /fuel {preço gasolina} {preço etanol} {km/l gasolina} {km/l etanol}
+    if (fuelData && commandStatus.fuel) {
+      if (fuelData.incompleto) {
+        await sendTextWithLog(
+          sock,
+          from,
+          "⚠️ Use: /fuel {preço gasolina} {preço etanol} {km/l gasolina} {km/l etanol}\n" +
+            "Exemplo: /fuel 6.19 4.49 12 8"
+        );
         return;
       }
 
-      if (isCacauShowCommand(content) && commandStatus.cacaushow) {
-        if (runningByChat.has(message.from)) {
-          await sendTextWithLog(
-            client,
-            message.from,
-            "⏳ Já existe uma geração em andamento para este chat.",
-          );
-          return;
-        }
-
-        runningByChat.add(message.from);
+      if (fuelData.invalido) {
         await sendTextWithLog(
-          client,
-          message.from,
-          "🚀 Iniciando o gerador Cacau Show. Aguarde as próximas mensagens...",
+          sock,
+          from,
+          "❌ Valores inválidos. Use números positivos.\n" +
+            "Exemplo: /fuel 6.19 4.49 12 8"
         );
-
-        try {
-          const resultado = await criarMembro({
-            salvarRequisicoesTxt: SALVAR_REQUISICOES_TXT,
-            onOutput: async (texto) => {
-              await sendTextWithLog(client, message.from, String(texto));
-            },
-          });
-
-          await sendTextWithLog(
-            client,
-            message.from,
-            ["✅ Fluxo finalizado."].join("\n"),
-          );
-        } catch (error) {
-          console.error("Erro no /cacaushow:", error);
-          await sendTextWithLog(
-            client,
-            message.from,
-            "❌ Ocorreu um erro ao executar o gerador Cacau Show.",
-          );
-        } finally {
-          runningByChat.delete(message.from);
-        }
+        return;
       }
-    } catch (error) {
-      console.error("Erro ao processar mensagem:", error);
+
+      try {
+        const resultado = calcularCombustivel(
+          fuelData.precoGasolina,
+          fuelData.precoEtanol,
+          fuelData.kmLGasolina,
+          fuelData.kmLEtanol
+        );
+        await sendTextWithLog(sock, from, resultado.mensagem);
+      } catch (error) {
+        console.error("Erro no /fuel:", error);
+        await sendTextWithLog(
+          sock,
+          from,
+          "❌ Erro ao calcular. Verifique os valores e tente novamente."
+        );
+      }
+
+      return;
+    }
+
+    // /cacaushow
+    if (isCacauShowCommand(content) && commandStatus.cacaushow) {
+      if (runningByChat.has(from)) {
+        await sendTextWithLog(
+          sock,
+          from,
+          "⏳ Já existe uma geração em andamento para este chat."
+        );
+        return;
+      }
+
+      runningByChat.add(from);
+      await sendTextWithLog(
+        sock,
+        from,
+        "🚀 Iniciando o gerador Cacau Show. Aguarde as próximas mensagens..."
+      );
+
+      try {
+        await criarMembro({
+          salvarRequisicoesTxt: SALVAR_REQUISICOES_TXT,
+          onOutput: async (texto) => {
+            await sendTextWithLog(sock, from, String(texto));
+          },
+        });
+
+        await sendTextWithLog(sock, from, "✅ Fluxo finalizado.");
+      } catch (error) {
+        console.error("Erro no /cacaushow:", error);
+        await sendTextWithLog(
+          sock,
+          from,
+          "❌ Ocorreu um erro ao executar o gerador Cacau Show."
+        );
+      } finally {
+        runningByChat.delete(from);
+      }
+    }
+  } catch (error) {
+    console.error("Erro ao processar mensagem:", error);
+  }
+}
+
+// ─── Conexão com o Baileys ────────────────────────────────────────────────────
+
+async function connectToWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    // Logger silencioso — mude para 'info' ou 'debug' se quiser mais detalhes
+    logger: pino({ level: "silent" }),
+    printQRInTerminal: false, // exibimos manualmente via qrcode-terminal
+    browser: ["Allysongs Bot", "Chrome", "1.0.0"],
+    syncFullHistory: false,
+  });
+
+  // Exibe QR Code no terminal
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      console.log("\n📱 Escaneie o QR Code abaixo com o WhatsApp:\n");
+      qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === "close") {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+      console.log(
+        `🔌 Conexão encerrada (código ${statusCode}). Reconectando: ${shouldReconnect}`
+      );
+
+      if (shouldReconnect) {
+        // Aguarda 3 segundos antes de tentar reconectar
+        setTimeout(connectToWhatsApp, 3000);
+      } else {
+        console.log(
+          "🚪 Sessão encerrada (logout). Apague a pasta auth_info_baileys e reinicie."
+        );
+      }
+    }
+
+    if (connection === "open") {
+      console.log("✅ Allysongs Bot conectado ao WhatsApp com sucesso!");
+    }
+  });
+
+  // Salva credenciais sempre que atualizadas
+  sock.ev.on("creds.update", saveCreds);
+
+  // Processa mensagens recebidas
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+    for (const msg of messages) {
+      await handleMessage(sock, msg);
     }
   });
 }
 
-function getVPSChromeConfig() {
-  const forcedPath =
-    process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+// ─── Inicialização ────────────────────────────────────────────────────────────
 
-  const candidates = [
-    forcedPath,
-    "/snap/bin/chromium",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-  ].filter(Boolean);
-
-  const isUsableBrowser = (binPath) => {
-    if (!fs.existsSync(binPath)) return false;
-
-    const check = spawnSync(binPath, ["--version"], {
-      encoding: "utf8",
-      timeout: 10000,
-    });
-
-    const output = `${check.stdout || ""}\n${check.stderr || ""}`.toLowerCase();
-    const looksLikeBrowser =
-      output.includes("chromium") || output.includes("google chrome");
-    return check.status === 0 && looksLikeBrowser;
-  };
-
-  const executablePath = candidates.find((bin) => isUsableBrowser(bin)) || null;
-
-  if (!executablePath) {
-    throw new Error(
-      "Nenhum Chrome/Chromium válido encontrado. Instale Chromium e/ou defina CHROME_PATH com um binário funcional.",
-    );
-  }
-
-  console.log(`🔧 Browser forçado: ${executablePath}`);
-
-  return {
-    useChrome: true,
-    executablePath,
-    browserArgs: [
-      "--headless",
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--disable-software-rasterizer",
-      "--disable-extensions",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-background-networking",
-      "--remote-debugging-port=0",
-      "--window-size=1366,768",
-    ],
-  };
-}
-
-function getOpenWaConfig() {
-  const base = {
-    sessionId: "allysongs-bot",
-    multiDevice: true,
-    qrTimeout: 0,
-    authTimeout: 0,
-    headless: true,
-    logConsole: false,
-    popup: false,
-  };
-
-  const isVPSLinux = process.platform === "linux";
-  if (!isVPSLinux) return base;
-
-  console.log(
-    "🐧 Ambiente VPS Linux detectado. Aplicando configuração de browser.",
-  );
-
-  const vpsChrome = getVPSChromeConfig();
-  process.env.CHROME_PATH = vpsChrome.executablePath;
-  process.env.PUPPETEER_EXECUTABLE_PATH = vpsChrome.executablePath;
-  process.env.PUPPETEER_SKIP_DOWNLOAD = "true";
-
-  return {
-    ...base,
-    ...vpsChrome,
-    puppeteerOptions: {
-      executablePath: vpsChrome.executablePath,
-      args: vpsChrome.browserArgs,
-      timeout: 120000,
-    },
-  };
-}
-
-create(getOpenWaConfig())
-  .then(start)
-  .catch((error) => {
-    console.error("❌ Falha ao iniciar o bot:", error);
-  });
+connectToWhatsApp().catch((error) => {
+  console.error("❌ Falha ao iniciar o bot:", error);
+  process.exit(1);
+});

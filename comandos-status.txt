@@ -5,3 +5,4 @@
 help=on
 cacaushow=on
 encurtar=on
+fuel=on

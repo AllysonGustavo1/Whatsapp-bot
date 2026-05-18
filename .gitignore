@@ -7,3 +7,6 @@ session.data.json
 .DS_Store
 Thumbs.db
 *.deb
+
+# Baileys session credentials
+auth_info_baileys/
