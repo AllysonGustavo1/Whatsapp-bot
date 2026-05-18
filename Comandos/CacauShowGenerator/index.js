@@ -28,8 +28,8 @@ const API_HEADERS = globalThis.API_HEADERS || {
 const SENHA = "Zelele123@";
 const CODIGO_EMAIL = globalThis.CODIGO_EMAIL || null;
 const TOKEN_RESGATE = globalThis.TOKEN_RESGATE || globalThis.TOKEN;
-const EXPERIENCIA_ID = globalThis.EXPERIENCIA_ID || 2011;
-const OFERTA_ID = globalThis.OFERTA_ID || 8265;
+const EXPERIENCIA_ID = globalThis.EXPERIENCIA_ID || 4467;
+const OFERTA_ID = globalThis.OFERTA_ID || 10491;
 const SALVAR_REQUISICOES_TXT = globalThis.SALVAR_REQUISICOES_TXT || false;
 const PASTA_LOGS_REQUISICOES_TXT =
   globalThis.PASTA_LOGS_REQUISICOES_TXT || "./logs-requisicoes";
@@ -110,6 +110,10 @@ async function criarMembro({
   resultado.autenticacaoEmail = authEmail;
   salvarParcial();
 
+  if (!authEmail.ok) {
+    console.warn(`[CacauShow] Autenticação falhou (HTTP ${authEmail.status}):`, authEmail.bodyText);
+  }
+
   const tokenResgateFinal = TOKEN_RESGATE || authEmail.token;
   const resultadoResgate = await fluxoResgateTrufa({
     apiHeaders: API_HEADERS,
@@ -118,6 +122,13 @@ async function criarMembro({
     ofertaId: OFERTA_ID,
     pagina: 1,
   });
+
+  if (!resultadoResgate.resgate?.ok) {
+    console.warn(`[CacauShow] Resgate falhou (HTTP ${resultadoResgate.resgate?.status}):`, resultadoResgate.resgate?.bodyText);
+  }
+  if (!resultadoResgate.meusResgates?.ok) {
+    console.warn(`[CacauShow] Listagem de resgates falhou (HTTP ${resultadoResgate.meusResgates?.status}):`, resultadoResgate.meusResgates?.bodyText);
+  }
 
   resultado.resgateTrufa = resultadoResgate.resgate;
   resultado.listarMeusResgates = resultadoResgate.meusResgates;
