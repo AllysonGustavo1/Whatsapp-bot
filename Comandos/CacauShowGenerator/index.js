@@ -28,8 +28,8 @@ const API_HEADERS = globalThis.API_HEADERS || {
 const SENHA = "Zelele123@";
 const CODIGO_EMAIL = globalThis.CODIGO_EMAIL || null;
 const TOKEN_RESGATE = globalThis.TOKEN_RESGATE || globalThis.TOKEN;
-const EXPERIENCIA_ID = globalThis.EXPERIENCIA_ID || 4467;
-const OFERTA_ID = globalThis.OFERTA_ID || 10491;
+const EXPERIENCIA_ID = globalThis.EXPERIENCIA_ID || null;
+const OFERTA_ID = globalThis.OFERTA_ID || null;
 const SALVAR_REQUISICOES_TXT = globalThis.SALVAR_REQUISICOES_TXT || false;
 const PASTA_LOGS_REQUISICOES_TXT =
   globalThis.PASTA_LOGS_REQUISICOES_TXT || "./logs-requisicoes";
@@ -122,6 +122,12 @@ async function criarMembro({
     ofertaId: OFERTA_ID,
     pagina: 1,
   });
+
+  if (resultadoResgate.experienciaId) {
+    console.log(
+      `[CacauShow] Resgate processado com Experiência: ${resultadoResgate.experienciaId}, Oferta: ${resultadoResgate.ofertaId}`
+    );
+  }
 
   if (!resultadoResgate.resgate?.ok) {
     console.warn(`[CacauShow] Resgate falhou (HTTP ${resultadoResgate.resgate?.status}):`, resultadoResgate.resgate?.bodyText);

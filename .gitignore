@@ -10,3 +10,7 @@ Thumbs.db
 
 # Baileys session credentials
 auth_info_baileys/
+
+# Logs de requisições de depuração
+logs-requisicoes/
+

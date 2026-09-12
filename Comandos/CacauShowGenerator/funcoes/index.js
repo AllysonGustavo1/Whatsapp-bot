@@ -3,7 +3,14 @@ const {
   autenticarPorEmail,
   obterPorDocumentoEmail,
 } = require("./apis/conta");
-const { fluxoResgateTrufa } = require("./apis/resgate");
+const {
+  fluxoResgateTrufa,
+  resgatarTrufa,
+  listarMeusResgates,
+  buscarExperienciasAtivas,
+  obterLotesExperiencia,
+  encontrarExperienciaTrufa,
+} = require("./apis/resgate");
 const {
   gerarNomeAleatorio,
   gerarTelefoneAleatorio,
@@ -17,6 +24,11 @@ module.exports = {
   autenticarPorEmail,
   obterPorDocumentoEmail,
   fluxoResgateTrufa,
+  resgatarTrufa,
+  listarMeusResgates,
+  buscarExperienciasAtivas,
+  obterLotesExperiencia,
+  encontrarExperienciaTrufa,
   gerarNomeAleatorio,
   gerarTelefoneAleatorio,
   gerarEmailMailTm,
