@@ -9,6 +9,7 @@ const { criarMembro } = require("./Comandos/CacauShowGenerator");
 const { encurtarLink } = require("./Comandos/Encurtador");
 const { calcularCombustivel } = require("./Comandos/Fuel");
 const { verificarMimosBoticario } = require("./Comandos/BoticarioMimo");
+const { monitorBoticario } = require("./Comandos/BoticarioMimo/monitor");
 const fs = require("fs");
 const path = require("path");
 const qrcode = require("qrcode-terminal");
@@ -358,38 +359,28 @@ async function handleMessage(sock, message) {
     if (boticarioMimoData) {
       if (!(await checkCommandAccess("boticariomimo"))) return;
 
-      if (runningByChat.has(from)) {
-        await sendTextWithLog(
-          sock,
-          from,
-          "⏳ Já existe uma consulta em andamento para este chat."
-        );
-        return;
-      }
-
-      runningByChat.add(from);
-      await sendTextWithLog(
-        sock,
+      const resultadoToggle = monitorBoticario.alternar(
         from,
-        `🔎 Consultando estoque de mimos O Boticário para *${boticarioMimoData.cidade}*...`
+        boticarioMimoData.cidade
       );
+      await sendTextWithLog(sock, from, resultadoToggle.mensagem);
 
-      try {
-        const resultado = await verificarMimosBoticario({
-          cidade: boticarioMimoData.cidade,
-          salvarTxt: SALVAR_REQUISICOES_TXT,
-        });
-
-        await sendTextWithLog(sock, from, resultado.mensagem);
-      } catch (error) {
-        console.error("Erro no /boticariomimo:", error);
-        await sendTextWithLog(
-          sock,
-          from,
-          "❌ Erro ao consultar mimos O Boticário. Tente novamente em instantes."
-        );
-      } finally {
-        runningByChat.delete(from);
+      // Se acabou de ativar, faz uma checagem imediata para já informar a situação atual
+      if (resultadoToggle.ativo) {
+        try {
+          await sendTextWithLog(
+            sock,
+            from,
+            `🔎 Realizando primeira consulta para *${resultadoToggle.cidade}*...`
+          );
+          const resConsulta = await verificarMimosBoticario({
+            cidade: resultadoToggle.cidade,
+            salvarTxt: SALVAR_REQUISICOES_TXT,
+          });
+          await sendTextWithLog(sock, from, resConsulta.mensagem);
+        } catch (errCheck) {
+          console.error("Erro na checagem inicial do monitor:", errCheck.message);
+        }
       }
 
       return;
@@ -444,6 +435,10 @@ async function connectToWhatsApp() {
 
     if (connection === "open") {
       console.log("✅ Allysongs Bot conectado ao WhatsApp com sucesso!");
+      monitorBoticario.iniciar({
+        getSock: () => sock,
+        sendTextWithLog,
+      });
     }
   });
 
