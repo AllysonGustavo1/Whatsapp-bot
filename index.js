@@ -39,11 +39,46 @@ const DEFAULT_COMMANDS_CONFIG = {
 
 // ─── Utilitários de status e permissões ───────────────────────────────────────
 
-function getSenderNumber(message) {
-  const raw = message.key.participant || message.key.remoteJid || "";
-  const withoutServer = raw.split("@")[0];
-  const withoutDevice = withoutServer.split(":")[0];
-  return withoutDevice.replace(/\D/g, "");
+function getSenderIdentifiers(message) {
+  const ids = new Set();
+  const rawJid = message.key.participant || message.key.remoteJid || "";
+  const cleanId = rawJid.split("@")[0].split(":")[0].replace(/\D/g, "");
+  if (cleanId) ids.add(cleanId);
+
+  // Se o JID for um @lid, busca o número de telefone correspondente salvo pelo Baileys
+  if (rawJid.includes("@lid")) {
+    try {
+      const mappingPath = path.join(
+        AUTH_FOLDER,
+        `lid-mapping-${cleanId}_reverse.json`
+      );
+      if (fs.existsSync(mappingPath)) {
+        const phone = JSON.parse(fs.readFileSync(mappingPath, "utf8"));
+        const cleanPhone = String(phone || "").replace(/\D/g, "");
+        if (cleanPhone) ids.add(cleanPhone);
+      }
+    } catch (err) {
+      // silencioso
+    }
+  }
+
+  // Verifica campos alternativos do Baileys
+  if (message.key.remoteJidAlt) {
+    const alt = String(message.key.remoteJidAlt)
+      .split("@")[0]
+      .split(":")[0]
+      .replace(/\D/g, "");
+    if (alt) ids.add(alt);
+  }
+  if (message.key.participantAlt) {
+    const alt = String(message.key.participantAlt)
+      .split("@")[0]
+      .split(":")[0]
+      .replace(/\D/g, "");
+    if (alt) ids.add(alt);
+  }
+
+  return Array.from(ids);
 }
 
 function getCommandsConfig() {
@@ -66,7 +101,7 @@ function getCommandsConfig() {
   }
 }
 
-function isCommandAuthorized(config, commandName, senderNumber) {
+function isCommandAuthorized(config, commandName, senderIdentifiers) {
   const cmdConfig = config[commandName];
   if (!cmdConfig) return true;
 
@@ -75,27 +110,51 @@ function isCommandAuthorized(config, commandName, senderNumber) {
     return true;
   }
 
-  const cleanSender = String(senderNumber || "").replace(/\D/g, "");
-  if (!cleanSender) return false;
+  const ids = Array.isArray(senderIdentifiers)
+    ? senderIdentifiers
+    : [senderIdentifiers];
 
-  return autorizados.some((item) => {
-    const cleanItem = String(item).replace(/\D/g, "");
-    return (
-      cleanItem &&
-      (cleanSender === cleanItem ||
-        cleanSender.endsWith(cleanItem) ||
-        cleanItem.endsWith(cleanSender))
-    );
+  return ids.some((senderId) => {
+    const cleanSender = String(senderId || "").replace(/\D/g, "");
+    if (!cleanSender) return false;
+
+    return autorizados.some((item) => {
+      const cleanItem = String(item).replace(/\D/g, "");
+      return (
+        cleanItem &&
+        (cleanSender === cleanItem ||
+          cleanSender.endsWith(cleanItem) ||
+          cleanItem.endsWith(cleanSender))
+      );
+    });
   });
+}
+
+// ─── Nome da Conexão / Ambiente ───────────────────────────────────────────────
+
+function getConnectionName() {
+  if (process.env.BOT_NAME) {
+    return process.env.BOT_NAME;
+  }
+
+  const config = getCommandsConfig();
+  if (config.nomeConexao) {
+    return config.nomeConexao;
+  }
+
+  const isProduction =
+    process.env.NODE_ENV === "production" || process.platform === "linux";
+  return isProduction ? "Allysongs Bot Prod" : "Allysongs Bot Teste";
 }
 
 // ─── Mensagens ────────────────────────────────────────────────────────────────
 
 function buildHelpMessage(config) {
+  const nomeBot = getConnectionName();
   const label = (cmdName) =>
     config[cmdName]?.ativo ? "✅ ativo" : "⛔ desligado";
   return [
-    "🤖 *Allysongs Bot*",
+    `🤖 *${nomeBot}*`,
     "",
     "Comandos disponíveis:",
     `/help - ${label("help")}`,
@@ -200,7 +259,7 @@ async function handleMessage(sock, message) {
       "";
 
     const commandsConfig = getCommandsConfig();
-    const senderNumber = getSenderNumber(message);
+    const senderIdentifiers = getSenderIdentifiers(message);
     const encurtarData = parseEncurtarCommand(content);
     const fuelData = parseFuelCommand(content, PREFIX, COMMANDS.fuel);
     const boticarioMimoData = parseBoticarioMimoCommand(content);
@@ -218,7 +277,7 @@ async function handleMessage(sock, message) {
         );
         return false;
       }
-      if (!isCommandAuthorized(commandsConfig, commandName, senderNumber)) {
+      if (!isCommandAuthorized(commandsConfig, commandName, senderIdentifiers)) {
         await sendTextWithLog(
           sock,
           from,
@@ -396,14 +455,19 @@ async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
   const { version } = await fetchLatestBaileysVersion();
 
+  const nomeConexao = getConnectionName();
+  console.log(`🔌 Conectando ao WhatsApp como: "${nomeConexao}"`);
+
   const sock = makeWASocket({
     version,
     auth: state,
     // Logger silencioso — mude para 'info' ou 'debug' se quiser mais detalhes
     logger: pino({ level: "silent" }),
     printQRInTerminal: false, // exibimos manualmente via qrcode-terminal
-    browser: ["Allysongs Bot", "Chrome", "1.0.0"],
+    browser: [nomeConexao, "Chrome", "1.0.0"],
     syncFullHistory: false,
+    shouldIgnoreJid: (jid) => isJidBroadcast(jid),
+    getMessage: async (key) => undefined,
   });
 
   // Exibe QR Code no terminal
