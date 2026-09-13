@@ -8,6 +8,7 @@ const {
 const { criarMembro } = require("./Comandos/CacauShowGenerator");
 const { encurtarLink } = require("./Comandos/Encurtador");
 const { calcularCombustivel } = require("./Comandos/Fuel");
+const { verificarMimosBoticario } = require("./Comandos/BoticarioMimo");
 const fs = require("fs");
 const path = require("path");
 const qrcode = require("qrcode-terminal");
@@ -15,7 +16,7 @@ const pino = require("pino");
 
 const PREFIX = "/";
 const SALVAR_REQUISICOES_TXT = true;
-const COMMAND_STATUS_FILE = path.join(__dirname, "comandos-status.txt");
+const COMMANDS_CONFIG_FILE = path.join(__dirname, "comandos-config.json");
 const AUTH_FOLDER = path.join(__dirname, "auth_info_baileys");
 const runningByChat = new Set();
 
@@ -24,69 +25,85 @@ const COMMANDS = {
   cacaushow: ["cacaushow"],
   encurtar: ["encurtar"],
   fuel: ["fuel"],
+  boticariomimo: ["boticariomimo", "boticario", "mimo"],
 };
 
-// ─── Utilitários de status ────────────────────────────────────────────────────
+const DEFAULT_COMMANDS_CONFIG = {
+  help: { ativo: true, autorizados: ["*"] },
+  cacaushow: { ativo: true, autorizados: ["*"] },
+  encurtar: { ativo: true, autorizados: ["*"] },
+  fuel: { ativo: true, autorizados: ["*"] },
+  boticariomimo: { ativo: true, autorizados: ["558487672874"] },
+};
 
-function parseStatus(value = "") {
-  const normalized = String(value).trim().toLowerCase();
-  return ["on", "ativo", "ligado", "true", "1"].includes(normalized);
+// ─── Utilitários de status e permissões ───────────────────────────────────────
+
+function getSenderNumber(message) {
+  const raw = message.key.participant || message.key.remoteJid || "";
+  const withoutServer = raw.split("@")[0];
+  const withoutDevice = withoutServer.split(":")[0];
+  return withoutDevice.replace(/\D/g, "");
 }
 
-function getCommandStatus() {
-  const defaults = {
-    help: true,
-    cacaushow: true,
-    encurtar: true,
-    fuel: true,
-  };
-
+function getCommandsConfig() {
   try {
-    if (!fs.existsSync(COMMAND_STATUS_FILE)) {
-      return defaults;
+    if (fs.existsSync(COMMANDS_CONFIG_FILE)) {
+      const raw = fs.readFileSync(COMMANDS_CONFIG_FILE, "utf8");
+      const parsed = JSON.parse(raw);
+      return { ...DEFAULT_COMMANDS_CONFIG, ...parsed };
     }
 
-    const raw = fs.readFileSync(COMMAND_STATUS_FILE, "utf8");
-    const lines = raw.split(/\r?\n/);
-    const result = { ...defaults };
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-
-      const [nameRaw, statusRaw] = trimmed.includes("=")
-        ? trimmed.split("=")
-        : trimmed.split(":");
-
-      const name = String(nameRaw || "")
-        .trim()
-        .toLowerCase();
-      if (!Object.prototype.hasOwnProperty.call(result, name)) continue;
-
-      result[name] = parseStatus(statusRaw);
-    }
-
-    return result;
+    fs.writeFileSync(
+      COMMANDS_CONFIG_FILE,
+      JSON.stringify(DEFAULT_COMMANDS_CONFIG, null, 2),
+      "utf8"
+    );
+    return DEFAULT_COMMANDS_CONFIG;
   } catch (error) {
-    console.error("Erro ao ler comandos-status.txt:", error.message);
-    return defaults;
+    console.error("Erro ao ler comandos-config.json:", error.message);
+    return DEFAULT_COMMANDS_CONFIG;
   }
+}
+
+function isCommandAuthorized(config, commandName, senderNumber) {
+  const cmdConfig = config[commandName];
+  if (!cmdConfig) return true;
+
+  const autorizados = cmdConfig.autorizados || ["*"];
+  if (!Array.isArray(autorizados) || autorizados.includes("*")) {
+    return true;
+  }
+
+  const cleanSender = String(senderNumber || "").replace(/\D/g, "");
+  if (!cleanSender) return false;
+
+  return autorizados.some((item) => {
+    const cleanItem = String(item).replace(/\D/g, "");
+    return (
+      cleanItem &&
+      (cleanSender === cleanItem ||
+        cleanSender.endsWith(cleanItem) ||
+        cleanItem.endsWith(cleanSender))
+    );
+  });
 }
 
 // ─── Mensagens ────────────────────────────────────────────────────────────────
 
-function buildHelpMessage(status) {
-  const label = (isOn) => (isOn ? "✅ ativo" : "⛔ desligado");
+function buildHelpMessage(config) {
+  const label = (cmdName) =>
+    config[cmdName]?.ativo ? "✅ ativo" : "⛔ desligado";
   return [
     "🤖 *Allysongs Bot*",
     "",
     "Comandos disponíveis:",
-    `/help - ${label(status.help)}`,
-    `/ajuda - ${label(status.help)}`,
-    `/comandos - ${label(status.help)}`,
-    `/cacaushow - ${label(status.cacaushow)}`,
-    `/encurtar {link} - ${label(status.encurtar)}`,
-    `/fuel {p.gasolina} {p.etanol} {km/l gas} {km/l eta} - ${label(status.fuel)}`,
+    `/help - ${label("help")}`,
+    `/ajuda - ${label("help")}`,
+    `/comandos - ${label("help")}`,
+    `/cacaushow - ${label("cacaushow")}`,
+    `/encurtar {link} - ${label("encurtar")}`,
+    `/fuel {p.gasolina} {p.etanol} {km/l gas} {km/l eta} - ${label("fuel")}`,
+    `/boticariomimo [cidade] - ${label("boticariomimo")}`,
   ].join("\n");
 }
 
@@ -139,6 +156,17 @@ function parseFuelCommand(text = "") {
   return { precoGasolina, precoEtanol, kmLGasolina, kmLEtanol };
 }
 
+function parseBoticarioMimoCommand(text = "") {
+  if (!text.startsWith(PREFIX)) return null;
+  const [rawCmd, ...args] = text.trim().split(/\s+/);
+  const cmd = normalizeCommand(rawCmd);
+  if (!COMMANDS.boticariomimo.includes(cmd)) return null;
+
+  return {
+    cidade: args.join(" ").trim() || "Natal",
+  };
+}
+
 // ─── Log e envio ─────────────────────────────────────────────────────────────
 
 function logRequest(from, content) {
@@ -170,50 +198,47 @@ async function handleMessage(sock, message) {
       message.message?.listResponseMessage?.title ||
       "";
 
-    const commandStatus = getCommandStatus();
+    const commandsConfig = getCommandsConfig();
+    const senderNumber = getSenderNumber(message);
     const encurtarData = parseEncurtarCommand(content);
     const fuelData = parseFuelCommand(content, PREFIX, COMMANDS.fuel);
+    const boticarioMimoData = parseBoticarioMimoCommand(content);
 
     logRequest(from, content);
 
+    // Helper genérico para verificar ativação e permissão do comando
+    const checkCommandAccess = async (commandName) => {
+      const cmdConfig = commandsConfig[commandName];
+      if (cmdConfig && !cmdConfig.ativo) {
+        await sendTextWithLog(
+          sock,
+          from,
+          `⛔ O comando /${commandName} está desligado no momento.`
+        );
+        return false;
+      }
+      if (!isCommandAuthorized(commandsConfig, commandName, senderNumber)) {
+        await sendTextWithLog(
+          sock,
+          from,
+          `⛔ Você não tem permissão para usar o comando /${commandName}.`
+        );
+        return false;
+      }
+      return true;
+    };
+
     // /help /ajuda /comandos
-    if (isHelpCommand(content) && commandStatus.help) {
-      await sendTextWithLog(sock, from, buildHelpMessage(commandStatus));
-      return;
-    }
-
-    // /cacaushow desligado
-    if (isCacauShowCommand(content) && !commandStatus.cacaushow) {
-      await sendTextWithLog(
-        sock,
-        from,
-        "⛔ O comando /cacaushow está desligado no momento."
-      );
-      return;
-    }
-
-    // /encurtar desligado
-    if (encurtarData && !commandStatus.encurtar) {
-      await sendTextWithLog(
-        sock,
-        from,
-        "⛔ O comando /encurtar está desligado no momento."
-      );
-      return;
-    }
-
-    // /fuel desligado
-    if (fuelData && !commandStatus.fuel) {
-      await sendTextWithLog(
-        sock,
-        from,
-        "⛔ O comando /fuel está desligado no momento."
-      );
+    if (isHelpCommand(content)) {
+      if (!(await checkCommandAccess("help"))) return;
+      await sendTextWithLog(sock, from, buildHelpMessage(commandsConfig));
       return;
     }
 
     // /encurtar {link}
-    if (encurtarData && commandStatus.encurtar) {
+    if (encurtarData) {
+      if (!(await checkCommandAccess("encurtar"))) return;
+
       if (!encurtarData.originalUrl) {
         await sendTextWithLog(sock, from, "⚠️ Use: /encurtar {link}");
         return;
@@ -244,7 +269,9 @@ async function handleMessage(sock, message) {
     }
 
     // /fuel {preço gasolina} {preço etanol} {km/l gasolina} {km/l etanol}
-    if (fuelData && commandStatus.fuel) {
+    if (fuelData) {
+      if (!(await checkCommandAccess("fuel"))) return;
+
       if (fuelData.incompleto) {
         await sendTextWithLog(
           sock,
@@ -286,7 +313,9 @@ async function handleMessage(sock, message) {
     }
 
     // /cacaushow
-    if (isCacauShowCommand(content) && commandStatus.cacaushow) {
+    if (isCacauShowCommand(content)) {
+      if (!(await checkCommandAccess("cacaushow"))) return;
+
       if (runningByChat.has(from)) {
         await sendTextWithLog(
           sock,
@@ -322,6 +351,48 @@ async function handleMessage(sock, message) {
       } finally {
         runningByChat.delete(from);
       }
+      return;
+    }
+
+    // /boticariomimo [cidade]
+    if (boticarioMimoData) {
+      if (!(await checkCommandAccess("boticariomimo"))) return;
+
+      if (runningByChat.has(from)) {
+        await sendTextWithLog(
+          sock,
+          from,
+          "⏳ Já existe uma consulta em andamento para este chat."
+        );
+        return;
+      }
+
+      runningByChat.add(from);
+      await sendTextWithLog(
+        sock,
+        from,
+        `🔎 Consultando estoque de mimos O Boticário para *${boticarioMimoData.cidade}*...`
+      );
+
+      try {
+        const resultado = await verificarMimosBoticario({
+          cidade: boticarioMimoData.cidade,
+          salvarTxt: SALVAR_REQUISICOES_TXT,
+        });
+
+        await sendTextWithLog(sock, from, resultado.mensagem);
+      } catch (error) {
+        console.error("Erro no /boticariomimo:", error);
+        await sendTextWithLog(
+          sock,
+          from,
+          "❌ Erro ao consultar mimos O Boticário. Tente novamente em instantes."
+        );
+      } finally {
+        runningByChat.delete(from);
+      }
+
+      return;
     }
   } catch (error) {
     console.error("Erro ao processar mensagem:", error);

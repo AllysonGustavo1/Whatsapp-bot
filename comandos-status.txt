@@ -1,8 +1,0 @@
-# Comandos do Allysongs Bot
-# Formato: comando=on|off
-# Também aceita comando:on|off
-
-help=on
-cacaushow=on
-encurtar=on
-fuel=on

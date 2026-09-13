@@ -14,3 +14,10 @@ auth_info_baileys/
 # Logs de requisições de depuração
 logs-requisicoes/
 
+# Arquivos de configurações e permissões com dados pessoais
+comandos-config.json
+!comandos-config.example.json
+*-autorizados.txt
+usuarios-autorizados.txt
+enviar-teste.js
+test-*.js
