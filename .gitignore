@@ -21,3 +21,5 @@ comandos-config.json
 usuarios-autorizados.txt
 enviar-teste.js
 test-*.js
+boticariomimo-monitores.json
+*-monitores.json
