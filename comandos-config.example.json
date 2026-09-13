@@ -1,0 +1,24 @@
+{
+  "help": {
+    "ativo": true,
+    "autorizados": ["*"]
+  },
+  "cacaushow": {
+    "ativo": true,
+    "autorizados": ["*"]
+  },
+  "encurtar": {
+    "ativo": true,
+    "autorizados": ["*"]
+  },
+  "fuel": {
+    "ativo": true,
+    "autorizados": ["*"]
+  },
+  "boticariomimo": {
+    "ativo": true,
+    "autorizados": [
+      "5584999999999"
+    ]
+  }
+}
