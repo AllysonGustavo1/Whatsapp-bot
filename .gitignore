@@ -23,3 +23,8 @@ enviar-teste.js
 test-*.js
 boticariomimo-monitores.json
 *-monitores.json
+
+# Variaveis de ambiente
+.env
+.env.*
+!.env.example

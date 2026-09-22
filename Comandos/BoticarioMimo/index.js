@@ -1,14 +1,21 @@
 const fs = require("fs");
 const path = require("path");
+const {
+  obterCampanhaAtiva,
+  validarCampanha,
+  extrairSlugCampanha,
+  salvarCampanhaConfig,
+  iniciarAgendadorDiarioCampanha,
+  FALLBACK_CAMPAIGN,
+} = require("./campanha");
 
 const API_BASE = "https://acao-de-fluxo-api.prd.consumidor.grupoboticario.digital";
-const CAMPAIGN_ID_DEFAULT = "nativa-spa-ameixa-intensa-12-2026";
+const CAMPAIGN_ID_DEFAULT = FALLBACK_CAMPAIGN;
 const CONSUMER_CPF_DEFAULT = "04674914965";
 const CONSUMER_BIRTHDAY_DEFAULT = "1950-03-10";
 
-// Token padrão de fallback (caso o identify expire ou precise de token inicial)
-const INITIAL_TOKEN =
-  "";
+// Token padrão de fallback
+const INITIAL_TOKEN = "";
 
 function getHeaders(token = "") {
   const headers = {
@@ -191,14 +198,81 @@ function salvarLojasEmTxt({
   return caminhoArquivo;
 }
 
+function carregarEnv() {
+  const envPath = path.join(process.cwd(), ".env");
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+        if (key && !process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+}
+
+function getConsumerCredentials() {
+  carregarEnv();
+
+  // 1. Tenta carregar do arquivo .env
+  if (process.env.BOTICARIO_CONSUMER_CPF) {
+    return {
+      cpf: String(process.env.BOTICARIO_CONSUMER_CPF).replace(/\D/g, ""),
+      birthday:
+        process.env.BOTICARIO_CONSUMER_BIRTHDAY || CONSUMER_BIRTHDAY_DEFAULT,
+      name: process.env.BOTICARIO_CONSUMER_NAME || "",
+      gender: process.env.BOTICARIO_CONSUMER_GENDER || "F",
+      motherName: process.env.BOTICARIO_CONSUMER_MOTHER_NAME || "",
+    };
+  }
+
+  // 2. Tenta carregar de comandos-config.json
+  try {
+    const configPath = path.join(process.cwd(), "comandos-config.json");
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      if (config?.boticariomimo?.consumerCpf) {
+        return {
+          cpf: String(config.boticariomimo.consumerCpf).replace(/\D/g, ""),
+          birthday:
+            config.boticariomimo.consumerBirthday || CONSUMER_BIRTHDAY_DEFAULT,
+          name: config.boticariomimo.consumerName || "",
+          gender: config.boticariomimo.consumerGender || "F",
+          motherName: config.boticariomimo.consumerMotherName || "",
+        };
+      }
+    }
+  } catch {}
+
+  // 3. Fallback
+  return {
+    cpf: CONSUMER_CPF_DEFAULT,
+    birthday: CONSUMER_BIRTHDAY_DEFAULT,
+    name: "",
+    gender: "F",
+    motherName: "",
+  };
+}
+
 async function verificarMimosBoticario({
   cidade = "Natal",
-  campaignId = CAMPAIGN_ID_DEFAULT,
-  consumerCpf = CONSUMER_CPF_DEFAULT,
-  consumerBirthday = CONSUMER_BIRTHDAY_DEFAULT,
+  campaignId = null,
+  consumerCpf = null,
+  consumerBirthday = null,
   salvarTxt = true,
   onOutput = null,
 } = {}) {
+  const activeCampaignId = campaignId || (await obterCampanhaAtiva());
+  const creds = getConsumerCredentials();
+  const activeCpf = consumerCpf || creds.cpf;
+  const activeBirthday = consumerBirthday || creds.birthday;
+
   const emitir = async (msg) => {
     if (typeof onOutput === "function") {
       await onOutput(msg);
@@ -211,9 +285,9 @@ async function verificarMimosBoticario({
   let token = INITIAL_TOKEN;
   try {
     const ident = await identificarConsumidor({
-      campaignId,
-      consumerCpf,
-      consumerBirthday,
+      campaignId: activeCampaignId,
+      consumerCpf: activeCpf,
+      consumerBirthday: activeBirthday,
       bearerToken: INITIAL_TOKEN,
     });
     if (ident.accessToken) {
@@ -226,8 +300,8 @@ async function verificarMimosBoticario({
   // 2. Vincular canal loja física
   try {
     await vincularCanalLoja({
-      campaignId,
-      consumerCpf,
+      campaignId: activeCampaignId,
+      consumerCpf: activeCpf,
       token,
     });
   } catch (err) {
@@ -236,8 +310,8 @@ async function verificarMimosBoticario({
 
   // 3. Buscar lojas na cidade
   const lojas = await buscarLojasPorTexto({
-    campaignId,
-    consumerCpf,
+    campaignId: activeCampaignId,
+    consumerCpf: activeCpf,
     cidade,
     token,
   });
@@ -287,10 +361,6 @@ async function verificarMimosBoticario({
     if (avisoPrevisao) {
       linhasResposta.push(`\nℹ️ *Aviso:* ${avisoPrevisao}`);
     }
-
-    if (caminhoTxt) {
-      linhasResposta.push(`\n📄 Dados completos salvos em: *logs-requisicoes/${path.basename(caminhoTxt)}*`);
-    }
   }
 
   return {
@@ -308,6 +378,12 @@ module.exports = {
   vincularCanalLoja,
   buscarLojasPorTexto,
   salvarLojasEmTxt,
+  obterCampanhaAtiva,
+  validarCampanha,
+  extrairSlugCampanha,
+  salvarCampanhaConfig,
+  iniciarAgendadorDiarioCampanha,
+  FALLBACK_CAMPAIGN,
 };
 
 // Se for executado diretamente no terminal: node Comandos/BoticarioMimo/index.js [cidade]

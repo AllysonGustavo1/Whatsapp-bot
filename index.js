@@ -1,3 +1,26 @@
+const fs = require("fs");
+const path = require("path");
+
+function carregarEnv() {
+  const envPath = path.join(process.cwd(), ".env");
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+        if (key && !process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+}
+carregarEnv();
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -8,10 +31,15 @@ const {
 const { criarMembro } = require("./Comandos/CacauShowGenerator");
 const { encurtarLink } = require("./Comandos/Encurtador");
 const { calcularCombustivel } = require("./Comandos/Fuel");
-const { verificarMimosBoticario } = require("./Comandos/BoticarioMimo");
+const {
+  verificarMimosBoticario,
+  extrairSlugCampanha,
+  validarCampanha,
+  salvarCampanhaConfig,
+  obterCampanhaAtiva,
+  iniciarAgendadorDiarioCampanha,
+} = require("./Comandos/BoticarioMimo");
 const { monitorBoticario } = require("./Comandos/BoticarioMimo/monitor");
-const fs = require("fs");
-const path = require("path");
 const qrcode = require("qrcode-terminal");
 const pino = require("pino");
 
@@ -34,7 +62,11 @@ const DEFAULT_COMMANDS_CONFIG = {
   cacaushow: { ativo: true, autorizados: ["*"] },
   encurtar: { ativo: true, autorizados: ["*"] },
   fuel: { ativo: true, autorizados: ["*"] },
-  boticariomimo: { ativo: true, autorizados: ["558487672874"] },
+  boticariomimo: {
+    ativo: true,
+    autorizados: ["*"],
+    campanha: "floratta-blue-crystal-14-2026",
+  },
 };
 
 // ─── Utilitários de status e permissões ───────────────────────────────────────
@@ -222,7 +254,34 @@ function parseBoticarioMimoCommand(text = "") {
   const cmd = normalizeCommand(rawCmd);
   if (!COMMANDS.boticariomimo.includes(cmd)) return null;
 
+  const primeiroArg = (args[0] || "").toLowerCase();
+
+  // Subcomando: /boticariomimo campanha [link ou slug]
+  if (primeiroArg === "campanha" || primeiroArg === "brinde") {
+    const valor = args.slice(1).join(" ").trim();
+    return {
+      tipo: "campanha",
+      valor,
+    };
+  }
+
+  // Subcomando: /boticariomimo atualizar
+  if (primeiroArg === "atualizar" || primeiroArg === "sync") {
+    return {
+      tipo: "atualizar",
+    };
+  }
+
+  // Se passou diretamente um link: /boticariomimo https://campanha.boticario...
+  if (primeiroArg.includes("campanha.boticario.com.br")) {
+    return {
+      tipo: "campanha",
+      valor: args.join(" ").trim(),
+    };
+  }
+
   return {
+    tipo: "monitor",
     cidade: args.join(" ").trim() || "Natal",
   };
 }
@@ -414,10 +473,87 @@ async function handleMessage(sock, message) {
       return;
     }
 
-    // /boticariomimo [cidade]
+    // /boticariomimo [cidade | campanha | atualizar]
     if (boticarioMimoData) {
       if (!(await checkCommandAccess("boticariomimo"))) return;
 
+      // 1. Caso: Consulta ou Atualização manual de campanha
+      if (boticarioMimoData.tipo === "campanha") {
+        if (!boticarioMimoData.valor) {
+          const campanhaAtual = await obterCampanhaAtiva();
+          const info = await validarCampanha(campanhaAtual);
+          await sendTextWithLog(
+            sock,
+            from,
+            `🎁 *Campanha O Boticário Vigente:*\n` +
+              `🔹 ID: *${campanhaAtual}*\n` +
+              `🔹 Status: *${info.valida ? "Ativa (enabled)" : "Inativa"}*\n` +
+              `🔗 https://campanha.boticario.com.br/${campanhaAtual}/CADASTRO\n\n` +
+              `_Para alterar manualmente, envie: /boticariomimo campanha [link ou slug]_`
+          );
+          return;
+        }
+
+        const novoSlug = extrairSlugCampanha(boticarioMimoData.valor);
+        if (!novoSlug) {
+          await sendTextWithLog(
+            sock,
+            from,
+            `❌ Não foi possível identificar o código da campanha no texto informado.\nExemplo: */boticariomimo campanha floratta-blue-crystal-14-2026* ou envie o link da campanha.`
+          );
+          return;
+        }
+
+        await sendTextWithLog(
+          sock,
+          from,
+          `🔎 Validando nova campanha *${novoSlug}* junto à API do O Boticário...`
+        );
+        const checagem = await validarCampanha(novoSlug);
+        if (!checagem.valida) {
+          await sendTextWithLog(
+            sock,
+            from,
+            `⚠️ A campanha *${novoSlug}* retornou status: *${checagem.status}*.\nVerifique se o link ou código está correto.`
+          );
+          return;
+        }
+
+        salvarCampanhaConfig(novoSlug);
+        await sendTextWithLog(
+          sock,
+          from,
+          `✅ *Nova campanha configurada com sucesso!*\n` +
+            `🎁 Campanha: *${novoSlug}*\n` +
+            `📅 Início: ${checagem.initialDate ? new Date(checagem.initialDate).toLocaleDateString("pt-BR") : "Imediato"}\n` +
+            `📅 Término: ${checagem.finalDate ? new Date(checagem.finalDate).toLocaleDateString("pt-BR") : "A definir"}\n\n` +
+            `Todos os monitoramentos agora checam este brinde automaticamente!`
+        );
+        return;
+      }
+
+      // 2. Caso: Busca automática na web por nova campanha
+      if (boticarioMimoData.tipo === "atualizar") {
+        await sendTextWithLog(
+          sock,
+          from,
+          `🔄 Buscando automaticamente por campanhas ativas do O Boticário na web...`
+        );
+        const campanhaEncontrada = await obterCampanhaAtiva({
+          forcarAtualizacao: true,
+        });
+        const info = await validarCampanha(campanhaEncontrada);
+        await sendTextWithLog(
+          sock,
+          from,
+          `✨ *Resultado da verificação automática:*\n` +
+            `🎁 Campanha ativa: *${campanhaEncontrada}*\n` +
+            `🔹 Status: *${info.valida ? "Ativa e pronta para resgates" : "Aguardando liberação"}*`
+        );
+        return;
+      }
+
+      // 3. Caso padrão: Toggle de monitoramento para a cidade informada
       const resultadoToggle = monitorBoticario.alternar(
         from,
         boticarioMimoData.cidade
@@ -503,6 +639,7 @@ async function connectToWhatsApp() {
         getSock: () => sock,
         sendTextWithLog,
       });
+      iniciarAgendadorDiarioCampanha();
     }
   });
 
