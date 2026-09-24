@@ -118,6 +118,9 @@ function getCommandsConfig() {
     if (fs.existsSync(COMMANDS_CONFIG_FILE)) {
       const raw = fs.readFileSync(COMMANDS_CONFIG_FILE, "utf8");
       const parsed = JSON.parse(raw);
+      if (parsed.boticariomimo) {
+        parsed.boticariomimo.autorizados = ["*"];
+      }
       return { ...DEFAULT_COMMANDS_CONFIG, ...parsed };
     }
 
@@ -134,6 +137,11 @@ function getCommandsConfig() {
 }
 
 function isCommandAuthorized(config, commandName, senderIdentifiers) {
+  // /boticariomimo liberado para todos os usuários
+  if (commandName === "boticariomimo") {
+    return true;
+  }
+
   const cmdConfig = config[commandName];
   if (!cmdConfig) return true;
 
