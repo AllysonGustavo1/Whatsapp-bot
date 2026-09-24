@@ -144,10 +144,21 @@ class MonitorBoticario {
   }
 
   async executarRodada() {
-    if (this.emExecucao) return;
+    const agora = Date.now();
+    if (this.emExecucao) {
+      if (agora - (this.ultimaExecucaoEm || 0) > 60000) {
+        console.warn(
+          "[MONITOR BOTICÁRIO] Watchdog acionado: rodada anterior demorou mais de 60s. Liberando execução."
+        );
+        this.emExecucao = false;
+      } else {
+        return;
+      }
+    }
     if (this.monitores.size === 0) return;
 
     this.emExecucao = true;
+    this.ultimaExecucaoEm = agora;
     try {
       // Agrupa os chats por cidade para não duplicar requisições
       const cidadesMap = new Map(); // cidade -> [chatIds]

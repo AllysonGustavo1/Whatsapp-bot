@@ -61,6 +61,7 @@ async function identificarConsumidor({
 
   const response = await fetch(url, {
     method: "POST",
+    signal: AbortSignal.timeout(15000),
     headers,
     body: JSON.stringify({ consumerCpf, consumerBirthday }),
   });
@@ -90,6 +91,7 @@ async function vincularCanalLoja({
 
   const response = await fetch(url, {
     method: "POST",
+    signal: AbortSignal.timeout(15000),
     headers,
   });
 
@@ -110,6 +112,7 @@ async function buscarLojasPorTexto({
 
   const response = await fetch(url, {
     method: "GET",
+    signal: AbortSignal.timeout(15000),
     headers,
   });
 

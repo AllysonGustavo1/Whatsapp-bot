@@ -11,6 +11,7 @@ async function validarCampanha(campaignId) {
   try {
     const url = `${API_BASE}/campaign/${campaignId}/consumerEntryPoint`;
     const res = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
       headers: {
         "x-channel-source": "app",
         Origin: "https://campanha.boticario.com.br",
@@ -68,6 +69,7 @@ async function buscarCandidatosWeb() {
   for (const url of urlsDeBusca) {
     try {
       const res = await fetch(url, {
+        signal: AbortSignal.timeout(10000),
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -165,7 +167,14 @@ async function obterCampanhaAtiva({ forcarAtualizacao = false } = {}) {
   return FALLBACK_CAMPAIGN;
 }
 
+let agendadorIniciado = false;
+
 function iniciarAgendadorDiarioCampanha(callback = null) {
+  if (agendadorIniciado) {
+    return;
+  }
+  agendadorIniciado = true;
+
   function agendar() {
     const agora = new Date();
     const proximaExecucao = new Date(agora);
