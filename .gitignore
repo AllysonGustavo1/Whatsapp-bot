@@ -23,6 +23,7 @@ enviar-teste.js
 test-*.js
 boticariomimo-monitores.json
 *-monitores.json
+Comandos/Americanas/dados/
 
 # Variaveis de ambiente
 .env

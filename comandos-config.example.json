@@ -17,9 +17,11 @@
   },
   "boticariomimo": {
     "ativo": true,
-    "autorizados": [
-      "5584999999999"
-    ]
+    "autorizados": ["*"]
+  },
+  "americanas": {
+    "ativo": true,
+    "autorizados": ["*"]
   },
   "nomeConexao": null
 }

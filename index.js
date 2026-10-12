@@ -40,6 +40,14 @@ const {
   iniciarAgendadorDiarioCampanha,
 } = require("./Comandos/BoticarioMimo");
 const { monitorBoticario } = require("./Comandos/BoticarioMimo/monitor");
+const {
+  buildAmericanasHelpMessage,
+  parseAmericanasCommand,
+  executarPedidos,
+  executarCriarConta,
+  executarLimparResgatados,
+  obterContasUsuario,
+} = require("./Comandos/Americanas");
 const qrcode = require("qrcode-terminal");
 const pino = require("pino");
 
@@ -55,6 +63,7 @@ const COMMANDS = {
   encurtar: ["encurtar"],
   fuel: ["fuel"],
   boticariomimo: ["boticariomimo", "boticario", "mimo"],
+  americanas: ["americanas", "ame"],
 };
 
 const DEFAULT_COMMANDS_CONFIG = {
@@ -67,6 +76,7 @@ const DEFAULT_COMMANDS_CONFIG = {
     autorizados: ["*"],
     campanha: "floratta-blue-crystal-14-2026",
   },
+  americanas: { ativo: true, autorizados: ["*"] },
 };
 
 // ─── Utilitários de status e permissões ───────────────────────────────────────
@@ -209,6 +219,7 @@ function buildHelpMessage(config) {
     `/encurtar {link} - ${label("encurtar")}`,
     `/fuel {p.gasolina} {p.etanol} {km/l gas} {km/l eta} - ${label("fuel")}`,
     `/boticariomimo [cidade] - ${label("boticariomimo")}`,
+    `/americanas - ${label("americanas")}`,
   ].join("\n");
 }
 
@@ -320,6 +331,11 @@ async function handleMessage(sock, message) {
     if (!message.message) return;
     if (isJidBroadcast(message.key.remoteJid)) return;
 
+    // Ignora mensagens antigas (mais de 60s) para evitar reexecutar comandos do histórico sincronizado
+    const msgTime = Number(message.messageTimestamp || 0);
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (msgTime && nowSec - msgTime > 60) return;
+
     // Extrai o texto da mensagem (suporta texto simples, extendedText e listResponseMessage)
     const content =
       message.message?.conversation ||
@@ -327,28 +343,11 @@ async function handleMessage(sock, message) {
       message.message?.listResponseMessage?.title ||
       "";
 
-    // Trata mensagens enviadas pela própria conta
-    if (message.key.fromMe) {
-      const myPhone = sock.user?.id
-        ? sock.user.id.split("@")[0].split(":")[0].replace(/\D/g, "")
-        : "";
-      const myLid = sock.user?.lid
-        ? sock.user.lid.split("@")[0].split(":")[0].replace(/\D/g, "")
-        : "";
-      const remoteClean = (message.key.remoteJid || "")
-        .split("@")[0]
-        .split(":")[0]
-        .replace(/\D/g, "");
-
-      const isSelfChat = Boolean(
-        (myPhone && remoteClean === myPhone) ||
-        (myLid && remoteClean === myLid)
-      );
-
-      // Só aceita mensagem de si mesmo se for no próprio chat e começar com o prefixo de comando
-      if (!isSelfChat || !content.trim().startsWith(PREFIX)) {
-        return;
-      }
+    // Se a mensagem partiu da própria conta (fromMe):
+    // Só processa se for um comando (iniciado com PREFIX).
+    // Isso ignora conversas comuns e todas as mensagens/alertas enviados pelo próprio bot.
+    if (message.key.fromMe && !content.trim().startsWith(PREFIX)) {
+      return;
     }
 
     const from = message.key.remoteJid;
@@ -358,6 +357,7 @@ async function handleMessage(sock, message) {
     const encurtarData = parseEncurtarCommand(content);
     const fuelData = parseFuelCommand(content, PREFIX, COMMANDS.fuel);
     const boticarioMimoData = parseBoticarioMimoCommand(content);
+    const americanasData = parseAmericanasCommand(content, PREFIX);
 
     logRequest(from, content);
 
@@ -616,6 +616,158 @@ async function handleMessage(sock, message) {
 
       return;
     }
+
+    // /americanas [pedidos | criar conta | limpar resgatados | contas]
+    if (americanasData) {
+      if (!(await checkCommandAccess("americanas"))) return;
+
+      const ownerId = senderIdentifiers[0] || from;
+
+      // 1. Menu de ajuda/opções (/americanas, /americanas help, /americanas ajuda)
+      if (americanasData.tipo === "help") {
+        await sendTextWithLog(sock, from, buildAmericanasHelpMessage());
+        return;
+      }
+
+      // 2. Subcomando: /americanas contas (lista as contas salvas do próprio usuário)
+      if (americanasData.tipo === "minhas_contas") {
+        const contas = obterContasUsuario(ownerId);
+        if (contas.length === 0) {
+          await sendTextWithLog(
+            sock,
+            from,
+            "⚠️ Você ainda não possui nenhuma conta cadastrada no bot.\nEnvie */americanas criar conta* para gerar sua primeira conta!"
+          );
+          return;
+        }
+
+        const linhas = [
+          "📋 *Americanas - Suas Contas Cadastradas*",
+          `Total: *${contas.length}* conta(s)\n`,
+        ];
+        for (let i = 0; i < contas.length; i++) {
+          const c = contas[i];
+          const nomeStr = c.profile ? `${c.profile.firstName || ""} ${c.profile.lastName || ""}`.trim() : "";
+          linhas.push(`*${i + 1}.* \`${c.email}\` | Senha: \`${c.password}\`${nomeStr ? ` (${nomeStr})` : ""}`);
+        }
+        await sendTextWithLog(sock, from, linhas.join("\n"));
+        return;
+      }
+
+      // 3. Subcomando: /americanas pedidos [flags / parâmetros]
+      if (americanasData.tipo === "pedidos") {
+        if (runningByChat.has(from)) {
+          await sendTextWithLog(
+            sock,
+            from,
+            "⏳ Já existe uma operação em andamento para este chat. Aguarde a finalização."
+          );
+          return;
+        }
+
+        runningByChat.add(from);
+        try {
+          const resultado = await executarPedidos({
+            ownerId,
+            detalhado: americanasData.options.detalhado,
+            orderId: americanasData.options.pedido,
+            conta: americanasData.options.conta,
+            onOutput: async (texto) => {
+              await sendTextWithLog(sock, from, String(texto));
+            },
+          });
+
+          await sendTextWithLog(sock, from, resultado.mensagem);
+        } catch (error) {
+          console.error("Erro no /americanas pedidos:", error);
+          await sendTextWithLog(
+            sock,
+            from,
+            `❌ Erro ao consultar pedidos da Americanas: ${error.message || "Erro desconhecido"}`
+          );
+        } finally {
+          runningByChat.delete(from);
+        }
+        return;
+      }
+
+      // 4. Subcomando: /americanas criar conta [diretrizes]
+      if (americanasData.tipo === "criar_conta") {
+        if (runningByChat.has(from)) {
+          await sendTextWithLog(
+            sock,
+            from,
+            "⏳ Já existe uma operação em andamento para este chat. Aguarde a finalização."
+          );
+          return;
+        }
+
+        runningByChat.add(from);
+        try {
+          const resultado = await executarCriarConta({
+            ownerId,
+            options: americanasData.options,
+            onOutput: async (texto) => {
+              await sendTextWithLog(sock, from, String(texto));
+            },
+          });
+
+          await sendTextWithLog(sock, from, resultado.mensagem);
+        } catch (error) {
+          console.error("Erro no /americanas criar conta:", error);
+          await sendTextWithLog(
+            sock,
+            from,
+            `❌ Erro ao criar conta na Americanas: ${error.message || "Erro desconhecido"}`
+          );
+        } finally {
+          runningByChat.delete(from);
+        }
+        return;
+      }
+
+      // 5. Subcomando: /americanas limpar resgatados
+      if (americanasData.tipo === "limpar_resgatados") {
+        if (runningByChat.has(from)) {
+          await sendTextWithLog(
+            sock,
+            from,
+            "⏳ Já existe uma operação em andamento para este chat. Aguarde a finalização."
+          );
+          return;
+        }
+
+        runningByChat.add(from);
+        try {
+          const resultado = await executarLimparResgatados({
+            ownerId,
+            onOutput: async (texto) => {
+              await sendTextWithLog(sock, from, String(texto));
+            },
+          });
+
+          await sendTextWithLog(sock, from, resultado.mensagem);
+        } catch (error) {
+          console.error("Erro no /americanas limpar resgatados:", error);
+          await sendTextWithLog(
+            sock,
+            from,
+            `❌ Erro ao limpar contas resgatadas: ${error.message || "Erro desconhecido"}`
+          );
+        } finally {
+          runningByChat.delete(from);
+        }
+        return;
+      }
+
+      // 6. Subcomando desconhecido
+      await sendTextWithLog(
+        sock,
+        from,
+        `⚠️ Opção não reconhecida.\n\n` + buildAmericanasHelpMessage()
+      );
+      return;
+    }
   } catch (error) {
     console.error("Erro ao processar mensagem:", error);
   }
@@ -682,9 +834,9 @@ async function connectToWhatsApp() {
   // Salva credenciais sempre que atualizadas
   sock.ev.on("creds.update", saveCreds);
 
-  // Processa mensagens recebidas
+  // Processa mensagens recebidas (tanto mensagens recebidas 'notify' quanto sincronizadas do celular 'append')
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+    if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
       await handleMessage(sock, msg);
     }
