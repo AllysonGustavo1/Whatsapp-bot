@@ -8,6 +8,7 @@ const {
   gerarEmailMailTm,
   aguardarCodigoEmailMailTm,
   salvarRespostasEmTxt,
+  resolverRecaptchaRegistro,
 } = require("./funcoes");
 
 const API_HEADERS = globalThis.API_HEADERS || {
@@ -56,6 +57,16 @@ async function criarMembro({
   await emitir(`Senha: ${SENHA}`);
   await emitir(`E-mail(mail.tm): ${EMAIL}`);
 
+  await emitir("Resolvendo verificação de segurança (reCAPTCHA)...");
+  let recaptchaToken = "";
+  try {
+    recaptchaToken = await resolverRecaptchaRegistro({
+      onLog: (msg) => console.log(`[CacauShow Captcha] ${msg}`),
+    });
+  } catch (errCaptcha) {
+    console.warn(`[CacauShow] Falha ao resolver reCAPTCHA: ${errCaptcha.message}`);
+  }
+
   const resultado = {};
   const salvarParcial = () => {
     if (!salvarRequisicoesTxt) return;
@@ -69,6 +80,7 @@ async function criarMembro({
     senha: SENHA,
     telefone: TELEFONE,
     codigoEmail: CODIGO_EMAIL,
+    recaptchaToken,
     solicitarCodigo: async () => {
       const codigo = await aguardarCodigoEmailMailTm({
         email: EMAIL,

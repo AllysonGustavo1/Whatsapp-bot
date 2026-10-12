@@ -18,6 +18,7 @@ const {
 } = require("./geradores/dados");
 const { aguardarCodigoEmailMailTm } = require("./mail/mailtm");
 const { salvarRespostasEmTxt, salvarDebugMailTmTxt } = require("./utils/logs");
+const { resolverRecaptchaRegistro } = require("./captcha/recaptcha");
 
 module.exports = {
   CriacaoDeContaCompleta,
@@ -29,6 +30,7 @@ module.exports = {
   buscarExperienciasAtivas,
   obterLotesExperiencia,
   encontrarExperienciaTrufa,
+  resolverRecaptchaRegistro,
   gerarNomeAleatorio,
   gerarTelefoneAleatorio,
   gerarEmailMailTm,

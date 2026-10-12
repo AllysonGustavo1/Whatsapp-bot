@@ -54,6 +54,24 @@ async function buscarExperienciasAtivas({ apiHeaders, token }) {
   return lista;
 }
 
+const SLUG_ANIVERSARIO_SILVER = "aniversario-silver";
+
+async function obterDetalhesExperiencia({ apiHeaders, token, slug }) {
+  if (!slug) return null;
+  const url = `${URL_RESGATE_EXPERIENCIA_BASE}/obter-por-nome-identificador/${encodeURIComponent(
+    slug
+  )}/detalhe`;
+  const res = await fetchApi(url, {
+    method: "GET",
+    headers: {
+      ...apiHeaders,
+      authorization: `Bearer ${normalizarBearer(token)}`,
+    },
+  });
+  const detalhes = await extrairRespostaDetalhada(res);
+  return detalhes?.data || null;
+}
+
 async function obterLotesExperiencia({ apiHeaders, token, slug }) {
   if (!slug) return [];
   const url = `${URL_RESGATE_EXPERIENCIA_BASE}/obter-por-nome-identificador/${encodeURIComponent(
@@ -84,6 +102,47 @@ async function encontrarExperienciaTrufa({
   }
 
   try {
+    // 1. Tenta obter diretamente pelo slug oficial do Aniversário Silver
+    try {
+      const expSilver = await obterDetalhesExperiencia({
+        apiHeaders,
+        token,
+        slug: SLUG_ANIVERSARIO_SILVER,
+      });
+
+      if (expSilver?.experienciaId) {
+        const lotes = await obterLotesExperiencia({
+          apiHeaders,
+          token,
+          slug: SLUG_ANIVERSARIO_SILVER,
+        });
+
+        const loteValido =
+          lotes.find((l) => l?.cacaus === 0 || l?.valorPagamento === 0) ||
+          lotes.find((l) => l?.loteIlimitado || (l?.quantidadeDisponivel || 0) > 0) ||
+          lotes[0];
+
+        const resultado = {
+          experienciaId: expSilver.experienciaId,
+          ofertaId: loteValido?.loteId || DEFAULT_OFERTA_ID,
+          nome: expSilver.nome || "Aniversário Silver",
+          slug: SLUG_ANIVERSARIO_SILVER,
+          timestamp: Date.now(),
+        };
+
+        console.log(
+          `[CacauShow] Experiência obtida diretamente pelo slug '${SLUG_ANIVERSARIO_SILVER}': ${resultado.experienciaId} ("${resultado.nome}") | Oferta/Lote: ${resultado.ofertaId}`
+        );
+
+        cachedExperienciaConfig = resultado;
+        return resultado;
+      }
+    } catch (errSlug) {
+      console.warn(
+        `[CacauShow] Não foi possível obter experiência pelo slug '${SLUG_ANIVERSARIO_SILVER}': ${errSlug.message}. Tentando busca dinâmica...`
+      );
+    }
+
     const experiencias = await buscarExperienciasAtivas({ apiHeaders, token });
 
     const ehAniversarioSilver = (e) =>

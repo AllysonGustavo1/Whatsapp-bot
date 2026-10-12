@@ -1,6 +1,6 @@
 "use strict";
 
-const { salvarContaUsuario } = require("./storage");
+const { salvarContaUsuario, obterPerfilUsuario } = require("./storage");
 const { criarContaCompleta } = require("./services/americanas");
 const {
   gerarCPF,
@@ -48,10 +48,12 @@ async function executarCriarConta({
 
   const count = Math.min(Math.max(parseInt(options.accounts || options.count || 1, 10) || 1, 1), 10);
   const profileEnabled = options.profile !== false;
+  const perfilUsuario = (ownerId ? obterPerfilUsuario(ownerId) : null) || {};
 
   await emitir(
     `🚀 *Iniciando criação de ${count} conta(s) na Americanas...*\n` +
     `⚙️ *Perfil e endereço:* ${profileEnabled ? "Ativado" : "Desativado"}\n` +
+    (perfilUsuario.nome ? `👤 *Usando perfil fixo:* ${perfilUsuario.nome}\n` : "") +
     `⏳ Aguarde enquanto o e-mail temporário e os códigos são validados.`
   );
 
@@ -62,12 +64,12 @@ async function executarCriarConta({
     const prefixoLog = `[${i}/${count}]`;
 
     const nomeFicticio = gerarNomeCompleto();
-    const nomeFinal = options.nome || nomeFicticio.nomeCompleto;
-    const senhaFinal = ajustarSenha(options.senha || options.password);
-    const nascimentoFinal = options.nascimento || gerarDataNascimento();
-    const sexoFinal = options.sexo || gerarSexo();
-    const cpfFinal = options.cpf || gerarCPF();
-    const telefoneFinal = options.telefone || gerarTelefone();
+    const nomeFinal = options.nome || perfilUsuario.nome || nomeFicticio.nomeCompleto;
+    const senhaFinal = ajustarSenha(options.senha || options.password || perfilUsuario.senha);
+    const nascimentoFinal = options.nascimento || perfilUsuario.nascimento || gerarDataNascimento();
+    const sexoFinal = options.sexo || perfilUsuario.sexo || gerarSexo();
+    const cpfFinal = options.cpf || perfilUsuario.cpf || gerarCPF();
+    const telefoneFinal = options.telefone || perfilUsuario.telefone || gerarTelefone();
 
     try {
       await emitir(`⏳ ${prefixoLog} Criando e-mail temporário e solicitando código na Americanas...`);

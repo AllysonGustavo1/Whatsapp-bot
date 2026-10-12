@@ -46,6 +46,7 @@ const {
   executarPedidos,
   executarCriarConta,
   executarLimparResgatados,
+  executarPerfil,
   obterContasUsuario,
 } = require("./Comandos/Americanas");
 const qrcode = require("qrcode-terminal");
@@ -778,7 +779,28 @@ async function handleMessage(sock, message) {
         return;
       }
 
-      // 6. Subcomando desconhecido
+      // 6. Subcomando: /americanas perfil [limpar | reset | diretrizes]
+      if (americanasData.tipo === "perfil") {
+        try {
+          const resultado = await executarPerfil({
+            ownerId,
+            options: americanasData.options,
+            subAcao: americanasData.subAcao,
+          });
+
+          await sendTextWithLog(sock, from, resultado.mensagem);
+        } catch (error) {
+          console.error("Erro no /americanas perfil:", error);
+          await sendTextWithLog(
+            sock,
+            from,
+            `❌ Erro ao gerenciar perfil da Americanas: ${error.message || "Erro desconhecido"}`
+          );
+        }
+        return;
+      }
+
+      // 7. Subcomando desconhecido
       await sendTextWithLog(
         sock,
         from,

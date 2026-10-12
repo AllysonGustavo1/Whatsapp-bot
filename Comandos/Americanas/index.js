@@ -3,6 +3,7 @@
 const { executarPedidos } = require("./pedidos");
 const { executarCriarConta } = require("./criarConta");
 const { executarLimparResgatados } = require("./limpar");
+const { executarPerfil } = require("./perfil");
 const { obterContasUsuario, normalizarUserId } = require("./storage");
 
 /**
@@ -16,6 +17,7 @@ function buildAmericanasHelpMessage() {
     "",
     "• /americanas pedidos - Consulta os pedidos e códigos de retirada das suas contas",
     "• /americanas criar conta - Cria e ativa novas contas na Americanas com perfil completo",
+    "• /americanas perfil - Configura ou visualiza seu perfil padrão fixo (nome, senha, nascimento)",
     "• /americanas limpar resgatados - Exclui todas as suas contas cujos pedidos já foram retirados/entregues",
     "",
     "📌 *Como usar cada opção:*",
@@ -25,10 +27,15 @@ function buildAmericanasHelpMessage() {
     "• `/americanas pedidos detalhado` (mostra os produtos comprados e valores)",
     "• `/americanas pedidos 1667939111935-01` (consulta apenas um pedido específico)",
     "",
+    "🔹 *Salvar Perfil Padrão (Exclusivo por Usuário):*",
+    '• `/americanas perfil nome="Allyson Silva" senha="MinhaSenha123" nascimento="2000-05-23" sexo="masculino"`',
+    "• `/americanas perfil` (mostra seu perfil salvo no momento)",
+    "• `/americanas perfil limpar` (reseta para voltar a gerar dados aleatórios)",
+    "",
     "🔹 *Criar Contas:*",
-    "• `/americanas criar conta` (cria 1 conta com dados fictícios automáticos)",
-    "• `/americanas criar conta 2` (cria 2 contas automáticas)",
-    '• `/americanas criar conta contas=2 nome="Carlos Eduardo Silva" senha="MinhaSenha123" nascimento="1998-05-20" sexo="masculino"`',
+    "• `/americanas criar conta` (cria 1 conta usando seu perfil salvo ou dados automáticos)",
+    "• `/americanas criar conta 2` (cria 2 contas)",
+    '• `/americanas criar conta contas=2 nome="Carlos Eduardo"` (cria contas com override)',
     "",
     "🔹 *Limpar Contas Resgatadas:*",
     "• `/americanas limpar resgatados` (remove automaticamente as contas já retiradas)",
@@ -36,17 +43,17 @@ function buildAmericanasHelpMessage() {
     "🔹 *Minhas Contas:*",
     "• `/americanas contas` (lista suas contas salvas no bot)",
     "",
-    "⚙️ *Diretrizes aceitas em criar conta:*",
+    "⚙️ *Campos aceitos em criar conta e perfil:*",
     "• `contas=N` ou número avulso: Quantidade de contas a criar",
-    '• `nome="Nome Sobrenome"`: Nome fixo para a conta (opcional)',
+    '• `nome="Nome Sobrenome"`: Nome fixo para a conta',
     '• `senha="SuaSenha123"`: Senha definitiva (mín. 8 dígitos, maiúscula, minúscula e número)',
     '• `nascimento="AAAA-MM-DD"`: Data de nascimento',
-    '• `sexo="masculino"` ou `"feminino"`: Sexo para o perfil',
+    '• `sexo="masculino"` ou `"feminino"`: Sexo para o perfil cadastral',
     '• `cpf="00000000000"`: CPF específico (opcional)',
     '• `telefone="+5511999999999"`: Telefone específico (opcional)',
     "• `sem-perfil`: Cria apenas o login sem dados de endereço",
     "",
-    "🔒 _Privacidade: Cada usuário tem suas contas e pedidos 100% isolados dos demais!_",
+    "🔒 _Privacidade: Cada usuário tem seu perfil, contas e pedidos 100% isolados dos demais!_",
   ].join("\n");
 }
 
@@ -144,6 +151,22 @@ function parseAmericanasCommand(text = "", prefix = "/") {
     };
   }
 
+  // /americanas perfil [limpar | reset | campos]
+  if (subTextoLower.startsWith("perfil")) {
+    const semPerfil = subTexto.replace(/^perfil\b/i, "").trim();
+    const semPerfilLower = semPerfil.toLowerCase();
+    let subAcao = null;
+    if (semPerfilLower === "limpar" || semPerfilLower === "reset" || semPerfilLower === "remover") {
+      subAcao = "limpar";
+    }
+    const options = parseDirectives(semPerfil);
+    return {
+      tipo: "perfil",
+      subAcao,
+      options,
+    };
+  }
+
   // /americanas limpar resgatados | /americanas excluir resgatados | /americanas remover resgatados | /americanas limpar
   if (
     subTextoLower.startsWith("limpar resgatados") ||
@@ -210,6 +233,7 @@ module.exports = {
   executarPedidos,
   executarCriarConta,
   executarLimparResgatados,
+  executarPerfil,
   obterContasUsuario,
   normalizarUserId,
 };

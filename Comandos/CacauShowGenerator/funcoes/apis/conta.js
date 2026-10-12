@@ -40,7 +40,14 @@ function getDataNascimentoOntemBrasil(
   return `${y}-${m}-${d}T00:00:00.000-03:00`;
 }
 
-async function CriacaoDeConta({ apiHeaders, nome, email, senha, telefone }) {
+async function CriacaoDeConta({
+  apiHeaders,
+  nome,
+  email,
+  senha,
+  telefone,
+  recaptchaToken = "",
+}) {
   if (!apiHeaders) throw new Error("Os headers da API não foram definidos.");
   if (!nome) throw new Error("O nome não foi definido.");
   if (!email) throw new Error("O e-mail não foi definido.");
@@ -67,7 +74,9 @@ async function CriacaoDeConta({ apiHeaders, nome, email, senha, telefone }) {
     tipoDocumento: "CPF",
     linkUnsubscribe: "",
     queroSerLover: true,
+    genero: "N",
     ativo: true,
+    recaptchaToken: recaptchaToken || "",
   };
 
   const response = await fetchApi(URL_CRIACAO_MEMBRO, {
@@ -123,6 +132,7 @@ async function CriacaoDeContaCompleta({
   telefone,
   codigoEmail,
   solicitarCodigo,
+  recaptchaToken = "",
   onEtapa,
 }) {
   const criacao = await CriacaoDeConta({
@@ -131,8 +141,15 @@ async function CriacaoDeContaCompleta({
     email,
     senha,
     telefone,
+    recaptchaToken,
   });
   if (typeof onEtapa === "function") onEtapa("criacao", criacao);
+
+  if (!criacao.ok) {
+    throw new Error(
+      `Falha na criação de conta (HTTP ${criacao.status}): ${criacao.bodyText || ""}`
+    );
+  }
 
   const envioCodigo = await enviarCodigoEmail({
     apiHeaders,

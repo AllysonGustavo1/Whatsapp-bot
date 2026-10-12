@@ -5,6 +5,7 @@ const path = require("path");
 
 const DATA_DIR = path.join(__dirname, "dados");
 const CONTAS_FILE = path.join(DATA_DIR, "contas.json");
+const PERFIS_FILE = path.join(DATA_DIR, "perfis.json");
 
 function garantirDiretorio() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -30,6 +31,26 @@ function carregarTodasContas() {
 function salvarTodasContas(contas) {
   garantirDiretorio();
   fs.writeFileSync(CONTAS_FILE, JSON.stringify(contas, null, 2), "utf8");
+}
+
+function carregarTodosPerfis() {
+  garantirDiretorio();
+  if (!fs.existsSync(PERFIS_FILE)) {
+    return {};
+  }
+  try {
+    const raw = fs.readFileSync(PERFIS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    console.error("[Americanas Storage] Erro ao carregar perfis.json:", err.message);
+    return {};
+  }
+}
+
+function salvarTodosPerfis(perfis) {
+  garantirDiretorio();
+  fs.writeFileSync(PERFIS_FILE, JSON.stringify(perfis, null, 2), "utf8");
 }
 
 /**
@@ -141,10 +162,63 @@ function importarContasLegadasSeNecessario(ownerId) {
   }
 }
 
+/**
+ * Retorna o perfil configurado para o usuário especificado
+ */
+function obterPerfilUsuario(ownerId) {
+  const cleanOwner = normalizarUserId(ownerId);
+  const perfis = carregarTodosPerfis();
+  return perfis[cleanOwner] || null;
+}
+
+/**
+ * Salva ou atualiza campos do perfil padrão do usuário
+ */
+function salvarPerfilUsuario(ownerId, dadosNovos = {}) {
+  const cleanOwner = normalizarUserId(ownerId);
+  const perfis = carregarTodosPerfis();
+  const existente = perfis[cleanOwner] || {};
+
+  const atualizado = {
+    ...existente,
+    ...dadosNovos,
+    atualizadoEm: new Date().toISOString(),
+  };
+
+  // Remove chaves nulas ou indefinidas
+  for (const [k, v] of Object.entries(atualizado)) {
+    if (v === null || v === undefined || v === "") {
+      delete atualizado[k];
+    }
+  }
+
+  perfis[cleanOwner] = atualizado;
+  salvarTodosPerfis(perfis);
+  return atualizado;
+}
+
+/**
+ * Remove o perfil fixo do usuário (reset para dados aleatórios)
+ */
+function limparPerfilUsuario(ownerId) {
+  const cleanOwner = normalizarUserId(ownerId);
+  const perfis = carregarTodosPerfis();
+  if (perfis[cleanOwner]) {
+    delete perfis[cleanOwner];
+    salvarTodosPerfis(perfis);
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   obterContasUsuario,
   salvarContaUsuario,
   removerContasUsuario,
   importarContasLegadasSeNecessario,
   normalizarUserId,
+  obterPerfilUsuario,
+  salvarPerfilUsuario,
+  limparPerfilUsuario,
 };
+
