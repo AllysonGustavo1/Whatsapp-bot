@@ -75,7 +75,7 @@ function parseDirectives(text = "") {
   }
 
   const kvRegex =
-    /(?:--)?(contas?|accounts?|count|qtd|quantidade|nome|name|senha|password|pass|nascimento|birthdate|data-nascimento|sexo|gender|cpf|telefone|phone|tel|pedidos?|orderid|order_id|order|conta|account)\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/gi;
+    /(?:--)?(contas?|accounts?|count|qtd|quantidade|nome|name|senha|password|pass|nascimento|birthdate|data-nascimento|sexo|gender|cpf|telefone|phone|tel|cep|endereco|rua|pedidos?|orderid|order_id|order|conta|account)\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/gi;
 
   cleanText = cleanText.replace(kvRegex, (match, key, val1, val2, val3) => {
     const k = key.toLowerCase();
@@ -117,6 +117,8 @@ function parseDirectives(text = "") {
     sexo: flags.sexo || flags.gender || null,
     cpf: flags.cpf || null,
     telefone: flags.telefone || flags.phone || flags.tel || null,
+    cep: flags.cep || null,
+    endereco: flags.endereco || flags.rua || null,
     profile: flags.profile !== false,
     detalhado: Boolean(flags.detalhado),
     pedido: flags.pedido || flags.pedidos || flags.orderid || flags.order_id || flags.order || null,

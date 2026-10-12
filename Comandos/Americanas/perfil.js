@@ -8,6 +8,23 @@ const {
 const { ajustarSenha } = require("./criarConta");
 
 /**
+ * Monta as linhas formatadas de todos os campos do perfil.
+ * Campos não preenchidos exibem explicitamente _Aleatório_.
+ */
+function formatarCamposPerfil(perfil = {}) {
+  const p = perfil || {};
+  return [
+    `• *Nome:* ${p.nome || "_Aleatório_"}`,
+    `• *Senha:* ${p.senha ? `\`${p.senha}\`` : "_Aleatória (padrão do sistema)_"}`,
+    `• *Nascimento:* ${p.nascimento || "_Aleatório_"}`,
+    `• *Sexo:* ${p.sexo || "_Aleatório_"}`,
+    `• *CPF:* ${p.cpf || "_Aleatório_"}`,
+    `• *Telefone:* ${p.telefone || "_Aleatório_"}`,
+    `• *CEP:* ${p.cep || "_Aleatório_"}`,
+  ];
+}
+
+/**
  * Trata as operações do comando /americanas perfil
  */
 async function executarPerfil({ ownerId, options = {}, subAcao = null } = {}) {
@@ -17,9 +34,13 @@ async function executarPerfil({ ownerId, options = {}, subAcao = null } = {}) {
     if (removeu) {
       return {
         sucesso: true,
-        mensagem:
-          "✅ *Seu perfil fixo foi removido com sucesso!*\n\n" +
-          "Agora, ao criar novas contas, os dados voltarão a ser gerados aleatoriamente.",
+        mensagem: [
+          "✅ *Seu perfil fixo foi removido com sucesso!*",
+          "",
+          "Agora, ao criar novas contas, todos os campos voltarão a ser gerados como *Aleatório*:",
+          "",
+          ...formatarCamposPerfil({}),
+        ].join("\n"),
       };
     }
     return {
@@ -36,6 +57,8 @@ async function executarPerfil({ ownerId, options = {}, subAcao = null } = {}) {
   if (options.sexo) dadosParaSalvar.sexo = options.sexo;
   if (options.cpf) dadosParaSalvar.cpf = options.cpf;
   if (options.telefone) dadosParaSalvar.telefone = options.telefone;
+  if (options.cep) dadosParaSalvar.cep = options.cep;
+  if (options.endereco) dadosParaSalvar.endereco = options.endereco;
 
   const temCamposNovos = Object.keys(dadosParaSalvar).length > 0;
 
@@ -48,22 +71,11 @@ async function executarPerfil({ ownerId, options = {}, subAcao = null } = {}) {
       "",
       "A partir de agora, suas novas contas usarão esses dados automaticamente:",
       "",
-      `👤 *Nome:* ${perfilAtualizado.nome || "_Não definido (aleatório)_"}`,
-      `🔑 *Senha:* \`${perfilAtualizado.senha || "_Padrão do sistema_"}\``,
-      `🎂 *Nascimento:* ${perfilAtualizado.nascimento || "_Não definido (aleatório)_"}`,
-      `⚧️ *Sexo:* ${perfilAtualizado.sexo || "_Não definido (aleatório)_"}`,
+      ...formatarCamposPerfil(perfilAtualizado),
+      "",
+      "💡 _Para criar contas agora, basta enviar:_ */americanas criar conta*",
+      "🗑️ _Para remover seu perfil fixo:_ */americanas perfil limpar*",
     ];
-
-    if (perfilAtualizado.cpf) {
-      linhas.push(`📄 *CPF:* ${perfilAtualizado.cpf}`);
-    }
-    if (perfilAtualizado.telefone) {
-      linhas.push(`📱 *Telefone:* ${perfilAtualizado.telefone}`);
-    }
-
-    linhas.push("");
-    linhas.push("💡 _Para criar contas agora, basta enviar:_ */americanas criar conta*");
-    linhas.push("🗑️ _Para remover seu perfil fixo:_ */americanas perfil limpar*");
 
     return {
       sucesso: true,
@@ -72,17 +84,19 @@ async function executarPerfil({ ownerId, options = {}, subAcao = null } = {}) {
     };
   }
 
-  // 3. Ação: Consulta do perfil atual (quando enviou apenas /americanas perfil)
+  // 3. Ação: Consulta do perfil atual (/americanas perfil)
   const perfilAtual = obterPerfilUsuario(ownerId);
 
+  // Se não tem nada configurado ainda:
   if (!perfilAtual || Object.keys(perfilAtual).length === 0) {
     return {
       sucesso: true,
       mensagem: [
         "👤 *Americanas - Seu Perfil Padrão*",
         "",
-        "⚠️ Você ainda não configurou um perfil fixo.",
-        "Suas contas estão sendo criadas com dados fictícios gerados automaticamente a cada criação.",
+        ...formatarCamposPerfil({}),
+        "",
+        "⚠️ _Você ainda não configurou um perfil fixo. Suas contas estão sendo criadas com dados fictícios gerados automaticamente a cada criação._",
         "",
         "📌 *Como salvar seus dados fixos (basta fazer uma vez):*",
         '• `/americanas perfil nome="Seu Nome Completo" senha="SuaSenha123" nascimento="2000-05-23" sexo="masculino"`',
@@ -92,27 +106,17 @@ async function executarPerfil({ ownerId, options = {}, subAcao = null } = {}) {
     };
   }
 
+  // Se já possui perfil configurado:
   const linhas = [
     "👤 *Americanas - Seu Perfil Salvo*",
     "",
-    `• *Nome:* ${perfilAtual.nome || "_Não definido_"}`,
-    `• *Senha:* \`${perfilAtual.senha || "_Padrão do sistema_"}\``,
-    `• *Nascimento:* ${perfilAtual.nascimento || "_Não definido_"}`,
-    `• *Sexo:* ${perfilAtual.sexo || "_Não definido_"}`,
+    ...formatarCamposPerfil(perfilAtual),
+    "",
+    "✨ _Ao criar contas com `/americanas criar conta`, os dados definidos serão aplicados e os marcados como Aleatório serão gerados automaticamente._",
+    "",
+    "✏️ _Para alterar/adicionar campos: envie `/americanas perfil [novos campos]`_",
+    "🗑️ _Para resetar seu perfil: envie `/americanas perfil limpar`_",
   ];
-
-  if (perfilAtual.cpf) {
-    linhas.push(`• *CPF:* ${perfilAtual.cpf}`);
-  }
-  if (perfilAtual.telefone) {
-    linhas.push(`• *Telefone:* ${perfilAtual.telefone}`);
-  }
-
-  linhas.push("");
-  linhas.push("✨ _Ao criar contas com `/americanas criar conta`, esses dados serão aplicados automaticamente._");
-  linhas.push("");
-  linhas.push("✏️ _Para alterar algum campo: envie `/americanas perfil [novos campos]`_");
-  linhas.push("🗑️ _Para resetar seu perfil: envie `/americanas perfil limpar`_");
 
   return {
     sucesso: true,
@@ -123,4 +127,5 @@ async function executarPerfil({ ownerId, options = {}, subAcao = null } = {}) {
 
 module.exports = {
   executarPerfil,
+  formatarCamposPerfil,
 };

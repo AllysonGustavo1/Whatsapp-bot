@@ -8,13 +8,36 @@ const { execSync } = require("child_process");
 
 puppeteer.use(StealthPlugin());
 
-function obterCaminhoChrome() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+function verificarExecutavel(caminho) {
+  if (!caminho || typeof caminho !== "string") return false;
+  try {
+    if (!fs.existsSync(caminho)) return false;
+    // No Linux/Unix, testar se roda --version para evitar stubs falsos como o wrapper do snap
+    if (process.platform !== "win32") {
+      const stats = fs.statSync(caminho);
+      if (!stats.isFile() && !stats.isSymbolicLink()) return false;
+      execSync(`"${caminho}" --version`, { stdio: "ignore", timeout: 4000 });
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function obterCaminhoChrome() {
+  if (
+    process.env.PUPPETEER_EXECUTABLE_PATH &&
+    verificarExecutavel(process.env.PUPPETEER_EXECUTABLE_PATH)
+  ) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
-  if (process.env.CHROME_PATH) {
+  if (
+    process.env.CHROME_PATH &&
+    verificarExecutavel(process.env.CHROME_PATH)
+  ) {
     return process.env.CHROME_PATH;
   }
+
   if (process.platform === "win32") {
     const caminhos = [
       "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -23,21 +46,46 @@ function obterCaminhoChrome() {
       "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
     ];
     for (const c of caminhos) {
-      if (fs.existsSync(c)) return c;
+      if (verificarExecutavel(c)) return c;
     }
   } else {
     const caminhosLinux = [
       "/usr/bin/google-chrome-stable",
       "/usr/bin/google-chrome",
-      "/usr/bin/chromium-browser",
       "/usr/bin/chromium",
       "/snap/bin/chromium",
+      "/usr/lib/chromium/chromium",
+      "/usr/lib/chromium-browser/chromium-browser",
+      "/usr/bin/chromium-browser",
     ];
     for (const c of caminhosLinux) {
-      if (fs.existsSync(c)) return c;
+      if (verificarExecutavel(c)) return c;
     }
   }
+
+  // Tenta obter o binário gerenciado pelo Puppeteer
+  try {
+    const puppeteerBase = require("puppeteer");
+    if (typeof puppeteerBase.executablePath === "function") {
+      const pPath = await puppeteerBase.executablePath();
+      if (verificarExecutavel(pPath)) {
+        return pPath;
+      }
+    }
+  } catch (_) {}
+
   return undefined;
+}
+
+function obterComandoPython() {
+  const comandos = ["python3", "python"];
+  for (const cmd of comandos) {
+    try {
+      execSync(`${cmd} --version`, { stdio: "ignore", timeout: 3000 });
+      return cmd;
+    } catch (_) {}
+  }
+  return "python3";
 }
 
 function downloadAudio(url, dest) {
@@ -57,14 +105,18 @@ function downloadAudio(url, dest) {
 
 function transcreverAudio(mp3Path) {
   const scriptPath = path.join(__dirname, "transcribe.py");
+  const pyCmd = obterComandoPython();
   try {
-    const result = execSync(`python "${scriptPath}" "${mp3Path}"`, {
+    const result = execSync(`${pyCmd} "${scriptPath}" "${mp3Path}"`, {
       encoding: "utf8",
-      timeout: 15000,
+      timeout: 20000,
     });
     return result.trim();
   } catch (err) {
-    console.warn("[reCAPTCHA] Falha ao transcrever áudio com Python:", err.message);
+    console.warn(
+      `[reCAPTCHA] Falha ao transcrever áudio com ${pyCmd}:`,
+      err.message
+    );
     return "";
   }
 }
@@ -75,20 +127,36 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
     console.log(`[reCAPTCHA] ${msg}`);
   };
 
-  const executablePath = obterCaminhoChrome();
+  const executablePath = await obterCaminhoChrome();
   log("Iniciando navegador em modo stealth para resolver validação de segurança...");
 
-  const browser = await puppeteer.launch({
-    executablePath,
+  const launchOptions = {
     headless: "new",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--no-first-run",
+      "--no-zygote",
       "--window-size=1280,1200",
     ],
-  });
+  };
+
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  }
+
+  let browser;
+  try {
+    browser = await puppeteer.launch(launchOptions);
+  } catch (errLaunch) {
+    throw new Error(
+      `Não foi possível iniciar o navegador Chrome/Chromium: ${errLaunch.message}.\n` +
+      `Se estiver em servidor Linux (Ubuntu), instale o Google Chrome ou execute: npx puppeteer browsers install chrome`
+    );
+  }
 
   const tempAudioPath = path.join(os.tmpdir(), `recaptcha_${Date.now()}.mp3`);
 
