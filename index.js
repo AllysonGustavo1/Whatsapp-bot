@@ -71,11 +71,16 @@ const DEFAULT_COMMANDS_CONFIG = {
 
 // ─── Utilitários de status e permissões ───────────────────────────────────────
 
-function getSenderIdentifiers(message) {
+function getSenderIdentifiers(message, sock) {
   const ids = new Set();
   const rawJid = message.key.participant || message.key.remoteJid || "";
   const cleanId = rawJid.split("@")[0].split(":")[0].replace(/\D/g, "");
   if (cleanId) ids.add(cleanId);
+
+  if (message.key.fromMe && sock?.user?.id) {
+    const myPhone = sock.user.id.split("@")[0].split(":")[0].replace(/\D/g, "");
+    if (myPhone) ids.add(myPhone);
+  }
 
   // Se o JID for um @lid, busca o número de telefone correspondente salvo pelo Baileys
   if (rawJid.includes("@lid")) {
@@ -311,12 +316,9 @@ async function sendTextWithLog(sock, to, text) {
 
 async function handleMessage(sock, message) {
   try {
-    // Ignora mensagens sem conteúdo, de broadcast ou enviadas pelo próprio bot
+    // Ignora mensagens sem conteúdo ou de broadcast
     if (!message.message) return;
     if (isJidBroadcast(message.key.remoteJid)) return;
-    if (message.key.fromMe) return;
-
-    const from = message.key.remoteJid;
 
     // Extrai o texto da mensagem (suporta texto simples, extendedText e listResponseMessage)
     const content =
@@ -325,8 +327,34 @@ async function handleMessage(sock, message) {
       message.message?.listResponseMessage?.title ||
       "";
 
+    // Trata mensagens enviadas pela própria conta
+    if (message.key.fromMe) {
+      const myPhone = sock.user?.id
+        ? sock.user.id.split("@")[0].split(":")[0].replace(/\D/g, "")
+        : "";
+      const myLid = sock.user?.lid
+        ? sock.user.lid.split("@")[0].split(":")[0].replace(/\D/g, "")
+        : "";
+      const remoteClean = (message.key.remoteJid || "")
+        .split("@")[0]
+        .split(":")[0]
+        .replace(/\D/g, "");
+
+      const isSelfChat = Boolean(
+        (myPhone && remoteClean === myPhone) ||
+        (myLid && remoteClean === myLid)
+      );
+
+      // Só aceita mensagem de si mesmo se for no próprio chat e começar com o prefixo de comando
+      if (!isSelfChat || !content.trim().startsWith(PREFIX)) {
+        return;
+      }
+    }
+
+    const from = message.key.remoteJid;
+
     const commandsConfig = getCommandsConfig();
-    const senderIdentifiers = getSenderIdentifiers(message);
+    const senderIdentifiers = getSenderIdentifiers(message, sock);
     const encurtarData = parseEncurtarCommand(content);
     const fuelData = parseFuelCommand(content, PREFIX, COMMANDS.fuel);
     const boticarioMimoData = parseBoticarioMimoCommand(content);
