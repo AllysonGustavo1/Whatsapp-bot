@@ -10,6 +10,9 @@
     "@whiskeysockets/baileys": "^6.7.18",
     "node-fetch": "^2.6.7",
     "pino": "^9.7.0",
+    "puppeteer": "^25.13.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "qrcode-terminal": "^0.12.0"
   }
 }
