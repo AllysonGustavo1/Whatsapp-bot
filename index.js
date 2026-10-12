@@ -56,6 +56,20 @@ const SALVAR_REQUISICOES_TXT = true;
 const COMMANDS_CONFIG_FILE = path.join(__dirname, "comandos-config.json");
 const AUTH_FOLDER = path.join(__dirname, "auth_info_baileys");
 const runningByChat = new Set();
+const processedMessageIds = new Set();
+
+function isDuplicateMessage(messageId) {
+  if (!messageId) return false;
+  if (processedMessageIds.has(messageId)) {
+    return true;
+  }
+  processedMessageIds.add(messageId);
+  if (processedMessageIds.size > 1000) {
+    const oldest = processedMessageIds.values().next().value;
+    processedMessageIds.delete(oldest);
+  }
+  return false;
+}
 
 const COMMANDS = {
   help: ["help", "ajuda", "comandos"],
@@ -330,6 +344,10 @@ async function handleMessage(sock, message) {
     // Ignora mensagens sem conteúdo ou de broadcast
     if (!message.message) return;
     if (isJidBroadcast(message.key.remoteJid)) return;
+
+    // Evita processamento duplicado (ex: mesma mensagem entregue em 'append' e 'notify')
+    const messageId = message.key?.id;
+    if (isDuplicateMessage(messageId)) return;
 
     // Ignora mensagens antigas (mais de 60s) para evitar reexecutar comandos do histórico sincronizado
     const msgTime = Number(message.messageTimestamp || 0);
