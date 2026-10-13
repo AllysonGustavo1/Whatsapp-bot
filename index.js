@@ -885,7 +885,17 @@ async function connectToWhatsApp() {
 
 // ─── Inicialização ────────────────────────────────────────────────────────────
 
-connectToWhatsApp().catch((error) => {
-  console.error("❌ Falha ao iniciar o bot:", error);
-  process.exit(1);
-});
+const { garantirAmbientePronto } = require("./scripts/setup-ambiente");
+
+(async () => {
+  try {
+    await garantirAmbientePronto();
+  } catch (errAmbiente) {
+    console.warn("[Setup] Aviso ao checar dependências de ambiente:", errAmbiente.message);
+  }
+
+  connectToWhatsApp().catch((error) => {
+    console.error("❌ Falha ao iniciar o bot:", error);
+    process.exit(1);
+  });
+})();

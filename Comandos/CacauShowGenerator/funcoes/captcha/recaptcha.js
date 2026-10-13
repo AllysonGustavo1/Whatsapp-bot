@@ -52,6 +52,7 @@ async function obterCaminhoChrome() {
     const caminhosLinux = [
       "/usr/bin/google-chrome-stable",
       "/usr/bin/google-chrome",
+      "/opt/google/chrome/google-chrome",
       "/usr/bin/chromium",
       "/snap/bin/chromium",
       "/usr/lib/chromium/chromium",
@@ -156,12 +157,10 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
     browser = await puppeteer.launch(launchOptions);
   } catch (errLaunch) {
     if (process.platform === "linux") {
-      log("Tentando baixar o Chrome automaticamente via Puppeteer...");
+      log("Tentando instalar o Google Chrome oficial via setup de ambiente...");
       try {
-        execSync("npx puppeteer browsers install chrome", {
-          stdio: "ignore",
-          timeout: 60000,
-        });
+        const { garantirAmbientePronto } = require("../../../../scripts/setup-ambiente");
+        await garantirAmbientePronto();
         const novoCaminho = await obterCaminhoChrome();
         if (novoCaminho) launchOptions.executablePath = novoCaminho;
         browser = await puppeteer.launch(launchOptions);
@@ -169,7 +168,7 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
         throw new Error(
           `Não foi possível iniciar o Chrome no servidor: ${errLaunch.message}.\n` +
           `Execute no terminal do Ubuntu:\n` +
-          `wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y`
+          `chmod +x setup.sh && ./setup.sh`
         );
       }
     } else {
