@@ -520,7 +520,7 @@ async function handleMessage(sock, message) {
         await sendTextWithLog(
           sock,
           from,
-          "❌ Ocorreu um erro ao executar o gerador Cacau Show."
+          `❌ Ocorreu um erro ao executar o gerador Cacau Show:\n${error.message}`
         );
       } finally {
         runningByChat.delete(from);

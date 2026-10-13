@@ -64,7 +64,12 @@ async function criarMembro({
       onLog: (msg) => console.log(`[CacauShow Captcha] ${msg}`),
     });
   } catch (errCaptcha) {
-    console.warn(`[CacauShow] Falha ao resolver reCAPTCHA: ${errCaptcha.message}`);
+    console.error(`[CacauShow] Falha ao resolver reCAPTCHA:`, errCaptcha);
+    throw new Error(`Falha no reCAPTCHA: ${errCaptcha.message}`);
+  }
+
+  if (!recaptchaToken) {
+    throw new Error("Não foi possível obter o token do reCAPTCHA.");
   }
 
   const resultado = {};

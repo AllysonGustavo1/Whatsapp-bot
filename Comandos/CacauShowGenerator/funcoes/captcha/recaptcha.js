@@ -113,11 +113,9 @@ function transcreverAudio(mp3Path) {
     });
     return result.trim();
   } catch (err) {
-    console.warn(
-      `[reCAPTCHA] Falha ao transcrever áudio com ${pyCmd}:`,
-      err.message
-    );
-    return "";
+    const detalhe = err.stderr ? String(err.stderr).trim() : err.message;
+    console.warn(`[reCAPTCHA] Falha ao transcrever áudio com ${pyCmd}:`, detalhe);
+    throw new Error(`Falha no Python de transcrição (${pyCmd}): ${detalhe}`);
   }
 }
 
@@ -152,10 +150,26 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
   try {
     browser = await puppeteer.launch(launchOptions);
   } catch (errLaunch) {
-    throw new Error(
-      `Não foi possível iniciar o navegador Chrome/Chromium: ${errLaunch.message}.\n` +
-      `Se estiver em servidor Linux (Ubuntu), instale o Google Chrome ou execute: npx puppeteer browsers install chrome`
-    );
+    if (process.platform === "linux") {
+      log("Tentando baixar o Chrome automaticamente via Puppeteer...");
+      try {
+        execSync("npx puppeteer browsers install chrome", {
+          stdio: "ignore",
+          timeout: 60000,
+        });
+        const novoCaminho = await obterCaminhoChrome();
+        if (novoCaminho) launchOptions.executablePath = novoCaminho;
+        browser = await puppeteer.launch(launchOptions);
+      } catch (errAutoInstall) {
+        throw new Error(
+          `Não foi possível iniciar o Chrome no servidor: ${errLaunch.message}.\n` +
+          `Execute no terminal do Ubuntu:\n` +
+          `wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y`
+        );
+      }
+    } else {
+      throw new Error(`Não foi possível iniciar o navegador: ${errLaunch.message}`);
+    }
   }
 
   const tempAudioPath = path.join(os.tmpdir(), `recaptcha_${Date.now()}.mp3`);
@@ -198,9 +212,30 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
     );
     const bframe = await bframeElement.contentFrame();
 
+    // Checa se o Google já bloqueou o IP para desafios automatizados
+    const bloqueioInicial = await bframe.evaluate(() => {
+      const el = document.querySelector(
+        ".rc-doscaptcha-header-text, .rc-doscaptcha-body-text"
+      );
+      return el ? el.innerText.trim() : null;
+    });
+    if (bloqueioInicial) {
+      throw new Error(`Google bloqueou requisições neste IP: "${bloqueioInicial}"`);
+    }
+
     await bframe.waitForSelector("#recaptcha-audio-button", { timeout: 15000 });
     await bframe.click("#recaptcha-audio-button");
     await new Promise((r) => setTimeout(r, 3000));
+
+    const bloqueioAposAudio = await bframe.evaluate(() => {
+      const el = document.querySelector(
+        ".rc-doscaptcha-header-text, .rc-doscaptcha-body-text, .rc-audiochallenge-error-message"
+      );
+      return el ? el.innerText.trim() : null;
+    });
+    if (bloqueioAposAudio) {
+      throw new Error(`Google bloqueou o áudio neste IP: "${bloqueioAposAudio}"`);
+    }
 
     const audioUrl = await bframe.evaluate(() => {
       const audio =
@@ -218,7 +253,7 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
 
     const textoTranscrito = transcreverAudio(tempAudioPath);
     if (!textoTranscrito) {
-      throw new Error("Não foi possível transcrever o áudio do reCAPTCHA.");
+      throw new Error("Áudio do reCAPTCHA não pôde ser transcrito.");
     }
 
     log(`Inserindo resposta da validação...`);
