@@ -511,13 +511,23 @@ async function criarContaCompleta({
     }
   }
 
-  // 7. Validar login independente
+  // 7. Validar login independente (non-fatal — conta já está criada)
   notify("validating_login", "Validando login com usuário e senha...");
-  const loginCheck = await validateLogin(jar, email, password);
-  if (!loginCheck.success) {
-    throw new Error("Conta criada, mas a validação de login falhou.");
+  let loginValidated = false;
+  try {
+    // Tenta validar com uma sessão limpa para evitar conflito de cookies
+    const freshJar = new CookieJar();
+    await startLogin(freshJar, email);
+    const loginCheck = await validateLogin(freshJar, email, password);
+    loginValidated = loginCheck.success;
+  } catch (validationErr) {
+    // ignora — a conta já foi criada com sucesso
   }
-  notify("login_validated", "Login verificado e funcionando perfeitamente!");
+  if (loginValidated) {
+    notify("login_validated", "Login verificado e funcionando perfeitamente!");
+  } else {
+    notify("login_warning", "Aviso: validação de login não confirmou, mas a conta foi criada com sucesso.");
+  }
 
   return {
     email,

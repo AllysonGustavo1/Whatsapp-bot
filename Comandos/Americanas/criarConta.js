@@ -91,6 +91,10 @@ async function executarCriarConta({
             await emitir(`🔑 ${prefixoLog} Senha definitiva vinculada com sucesso!`);
           } else if (step === "profile_updated") {
             await emitir(`📝 ${prefixoLog} Perfil e endereço salvos (Checkout liberado)!`);
+          } else if (step === "login_validated") {
+            await emitir(`✅ ${prefixoLog} Login validado com sucesso!`);
+          } else if (step === "login_warning") {
+            await emitir(`⚠️ ${prefixoLog} ${info}`);
           }
         },
       });
