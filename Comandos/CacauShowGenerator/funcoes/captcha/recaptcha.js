@@ -12,11 +12,10 @@ function verificarExecutavel(caminho) {
   if (!caminho || typeof caminho !== "string") return false;
   try {
     if (!fs.existsSync(caminho)) return false;
-    // No Linux/Unix, testar se roda --version para evitar stubs falsos como o wrapper do snap
     if (process.platform !== "win32") {
       const stats = fs.statSync(caminho);
       if (!stats.isFile() && !stats.isSymbolicLink()) return false;
-      execSync(`"${caminho}" --version`, { stdio: "ignore", timeout: 4000 });
+      execSync(`"${caminho}" --version`, { stdio: "ignore", timeout: 12000 });
     }
     return true;
   } catch (_) {
@@ -49,12 +48,24 @@ async function obterCaminhoChrome() {
       if (verificarExecutavel(c)) return c;
     }
   } else {
+    // 1. Tentar detectar via PATH no Linux
+    try {
+      const whichCmd = execSync(
+        "which chromium 2>/dev/null || which chromium-browser 2>/dev/null || which google-chrome-stable 2>/dev/null || which google-chrome 2>/dev/null",
+        { encoding: "utf8", timeout: 4000 }
+      ).trim();
+      if (whichCmd && verificarExecutavel(whichCmd)) {
+        return whichCmd;
+      }
+    } catch (_) {}
+
+    // 2. Tentar caminhos conhecidos
     const caminhosLinux = [
       "/snap/bin/chromium",
+      "/usr/bin/chromium",
       "/usr/bin/google-chrome-stable",
       "/usr/bin/google-chrome",
       "/opt/google/chrome/google-chrome",
-      "/usr/bin/chromium",
       "/usr/lib/chromium/chromium",
       "/usr/lib/chromium-browser/chromium-browser",
       "/usr/bin/chromium-browser",
@@ -127,7 +138,7 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
   };
 
   const executablePath = await obterCaminhoChrome();
-  log("Iniciando navegador em modo stealth para resolver validação de segurança...");
+  log(`Iniciando navegador em modo stealth: ${executablePath || "Padrão Puppeteer"}`);
 
   const launchOptions = {
     headless: "new",
@@ -143,7 +154,6 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
       "--disable-ipc-flooding-protection",
       "--no-first-run",
       "--no-zygote",
-      "--single-process",
       "--window-size=1280,1200",
     ],
   };
