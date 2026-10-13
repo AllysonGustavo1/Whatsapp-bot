@@ -11,19 +11,23 @@ const {
   resolverRecaptchaRegistro,
 } = require("./funcoes");
 
+const USER_AGENT_PADRAO =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 const API_HEADERS = globalThis.API_HEADERS || {
   accept: "application/json, text/plain, */*",
   "accept-language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
   "content-type": "application/json",
-  priority: "u=1, i",
+  origin: "https://lovers.cacaushow.com.br",
+  referer: "https://lovers.cacaushow.com.br/",
+  "user-agent": USER_AGENT_PADRAO,
   "sec-ch-ua":
-    '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
   "sec-ch-ua-mobile": "?0",
   "sec-ch-ua-platform": '"Windows"',
   "sec-fetch-dest": "empty",
   "sec-fetch-mode": "cors",
   "sec-fetch-site": "same-site",
-  Referer: "https://lovers.cacaushow.com.br/",
 };
 
 const SENHA = "Zelele123@";
@@ -57,54 +61,57 @@ async function criarMembro({
   await emitir(`Senha: ${SENHA}`);
   await emitir(`E-mail(mail.tm): ${EMAIL}`);
 
-  await emitir("Resolvendo verificação de segurança (reCAPTCHA)...");
-  let recaptchaToken = "";
-  try {
-    recaptchaToken = await resolverRecaptchaRegistro({
-      onLog: (msg) => console.log(`[CacauShow Captcha] ${msg}`),
-    });
-  } catch (errCaptcha) {
-    console.error(`[CacauShow] Falha ao resolver reCAPTCHA:`, errCaptcha);
-    throw new Error(`Falha no reCAPTCHA: ${errCaptcha.message}`);
-  }
-
-  if (!recaptchaToken) {
-    throw new Error("Não foi possível obter o token do reCAPTCHA.");
-  }
-
   const resultado = {};
   const salvarParcial = () => {
     if (!salvarRequisicoesTxt) return;
     salvarRespostasEmTxt(resultado, pastaLogsTxt);
   };
 
-  const resultadoConta = await CriacaoDeContaCompleta({
-    apiHeaders: API_HEADERS,
-    nome: NOME,
-    email: EMAIL,
-    senha: SENHA,
-    telefone: TELEFONE,
-    codigoEmail: CODIGO_EMAIL,
-    recaptchaToken,
-    solicitarCodigo: async () => {
-      const codigo = await aguardarCodigoEmailMailTm({
-        email: EMAIL,
-        senha: senhaMailbox,
-      });
-      return codigo;
-    },
-    onEtapa: (etapa, dados) => {
-      if (etapa === "criacao") {
-        resultado.criacao = dados;
-        resultado.documento = dados?.documento || resultado.documento;
-      } else if (etapa === "envioCodigo") {
-        resultado.envioCodigo = dados;
-      } else if (etapa === "validacaoCodigo") {
-        resultado.validacaoCodigo = dados;
-      }
-      salvarParcial();
-    },
-  });
+  await emitir("Resolvendo verificação de segurança (reCAPTCHA)...");
+
+  let resultadoConta = null;
+  try {
+    resultadoConta = await resolverRecaptchaRegistro({
+      onLog: (msg) => console.log(`[CacauShow Captcha] ${msg}`),
+      onResolvido: async ({ token, page }) => {
+        return await CriacaoDeContaCompleta({
+          apiHeaders: API_HEADERS,
+          nome: NOME,
+          email: EMAIL,
+          senha: SENHA,
+          telefone: TELEFONE,
+          codigoEmail: CODIGO_EMAIL,
+          recaptchaToken: token,
+          page,
+          solicitarCodigo: async () => {
+            const codigo = await aguardarCodigoEmailMailTm({
+              email: EMAIL,
+              senha: senhaMailbox,
+            });
+            return codigo;
+          },
+          onEtapa: (etapa, dados) => {
+            if (etapa === "criacao") {
+              resultado.criacao = dados;
+              resultado.documento = dados?.documento || resultado.documento;
+            } else if (etapa === "envioCodigo") {
+              resultado.envioCodigo = dados;
+            } else if (etapa === "validacaoCodigo") {
+              resultado.validacaoCodigo = dados;
+            }
+            salvarParcial();
+          },
+        });
+      },
+    });
+  } catch (errCaptcha) {
+    console.error(`[CacauShow] Falha no fluxo de cadastro/reCAPTCHA:`, errCaptcha);
+    throw new Error(`Falha no cadastro: ${errCaptcha.message}`);
+  }
+
+  if (!resultadoConta) {
+    throw new Error("Não foi possível concluir a criação da conta.");
+  }
 
   Object.assign(resultado, resultadoConta);
   salvarParcial();

@@ -131,7 +131,7 @@ function transcreverAudio(mp3Path) {
   }
 }
 
-async function resolverRecaptchaRegistro({ onLog } = {}) {
+async function resolverRecaptchaRegistro({ onLog, onResolvido } = {}) {
   const log = (msg) => {
     if (typeof onLog === "function") onLog(msg);
     console.log(`[reCAPTCHA] ${msg}`);
@@ -220,6 +220,9 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
 
     if (token) {
       log("Validação concluída imediatamente!");
+      if (typeof onResolvido === "function") {
+        return await onResolvido({ token, page });
+      }
       return token;
     }
 
@@ -290,6 +293,11 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
     }
 
     log("Validação de segurança resolvida com sucesso!");
+
+    if (typeof onResolvido === "function") {
+      return await onResolvido({ token, page });
+    }
+
     return token;
   } finally {
     if (fs.existsSync(tempAudioPath)) {

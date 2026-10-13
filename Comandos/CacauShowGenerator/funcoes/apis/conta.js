@@ -47,6 +47,7 @@ async function CriacaoDeConta({
   senha,
   telefone,
   recaptchaToken = "",
+  page = null,
 }) {
   if (!apiHeaders) throw new Error("Os headers da API não foram definidos.");
   if (!nome) throw new Error("O nome não foi definido.");
@@ -78,6 +79,48 @@ async function CriacaoDeConta({
     ativo: true,
     recaptchaToken: recaptchaToken || "",
   };
+
+  // Se page (Puppeteer) estiver ativa, executa diretamente no contexto do browser para bypass de WAF (Azion)
+  if (page && typeof page.evaluate === "function") {
+    try {
+      const respPage = await page.evaluate(
+        async (url, payload, hdrs) => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: hdrs,
+            body: JSON.stringify(payload),
+          });
+          const text = await res.text();
+          let parsed = null;
+          try {
+            parsed = JSON.parse(text);
+          } catch (_) {}
+          return {
+            status: res.status,
+            statusText: res.statusText,
+            ok: res.ok,
+            bodyText: text,
+            data: parsed,
+          };
+        },
+        URL_CRIACAO_MEMBRO,
+        membroPayload,
+        apiHeaders
+      );
+
+      if (respPage && (respPage.ok || !respPage.bodyText || !respPage.bodyText.includes("Azion"))) {
+        return {
+          response: null,
+          url: URL_CRIACAO_MEMBRO,
+          requestBody: membroPayload,
+          documento,
+          ...respPage,
+        };
+      }
+    } catch (errPage) {
+      console.warn("[CacauShow] Tentativa de cadastro via browser falhou, tentando fetch direto:", errPage.message);
+    }
+  }
 
   const response = await fetchApi(URL_CRIACAO_MEMBRO, {
     method: "POST",
@@ -133,6 +176,7 @@ async function CriacaoDeContaCompleta({
   codigoEmail,
   solicitarCodigo,
   recaptchaToken = "",
+  page = null,
   onEtapa,
 }) {
   const criacao = await CriacaoDeConta({
@@ -142,6 +186,7 @@ async function CriacaoDeContaCompleta({
     senha,
     telefone,
     recaptchaToken,
+    page,
   });
   if (typeof onEtapa === "function") onEtapa("criacao", criacao);
 
