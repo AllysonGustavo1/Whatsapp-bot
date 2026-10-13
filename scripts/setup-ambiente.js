@@ -56,6 +56,15 @@ function temFfmpeg() {
   }
 }
 
+function temFlac() {
+  try {
+    execSync("flac --version", { stdio: "ignore", timeout: 3000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function garantirAmbientePronto() {
   console.log(`[Setup] Verificando dependências do ambiente (${process.platform} ${process.arch})...`);
 
@@ -120,6 +129,22 @@ async function garantirAmbientePronto() {
       }
     } else {
       console.log("[Setup] ffmpeg operacional detectado.");
+    }
+
+    // 3. Verificar flac (necessário para speech_recognition enviar áudio no Linux)
+    if (!temFlac()) {
+      console.log("[Setup] flac ausente. Instalando via APT...");
+      try {
+        execSync("sudo apt-get install -y flac", {
+          stdio: "inherit",
+          timeout: 60000,
+        });
+        console.log("[Setup] flac instalado com sucesso!");
+      } catch (errFlac) {
+        console.warn("[Setup] Falha ao instalar flac:", errFlac.message);
+      }
+    } else {
+      console.log("[Setup] flac operacional detectado.");
     }
 
     // 3. Verificar dependências de áudio do Python
