@@ -12,16 +12,20 @@ function temComando(cmd) {
   }
 }
 
-function verificarChromeLinux() {
+function verificarNavegadorLinux() {
   const caminhos = [
+    "/snap/bin/chromium",
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
     "/opt/google/chrome/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/lib/chromium/chromium",
+    "/usr/bin/chromium-browser",
   ];
   for (const c of caminhos) {
     if (fs.existsSync(c)) {
       try {
-        execSync(`"${c}" --version`, { stdio: "ignore", timeout: 3000 });
+        execSync(`"${c}" --version`, { stdio: "ignore", timeout: 4000 });
         return c;
       } catch (_) {}
     }
@@ -44,38 +48,53 @@ function verificarPythonAudio() {
 }
 
 async function garantirAmbientePronto() {
-  console.log("[Setup] Verificando dependências do ambiente...");
+  console.log(`[Setup] Verificando dependências do ambiente (${process.platform} ${process.arch})...`);
 
   if (process.platform === "linux") {
-    // 1. Verificar Google Chrome
-    let chromePath = verificarChromeLinux();
-    if (!chromePath) {
+    // 1. Verificar Navegador (Chrome ou Chromium)
+    let browserPath = verificarNavegadorLinux();
+    if (!browserPath) {
       console.log(
-        "[Setup] Google Chrome não encontrado no Linux. Instalando automaticamente..."
+        "[Setup] Nenhum navegador compatível detectado no Linux. Instalando automaticamente..."
       );
       try {
-        const cmdInstalar = [
-          "wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
-          "sudo apt-get update -y",
-          "sudo apt-get install -y /tmp/google-chrome.deb || (sudo dpkg -i /tmp/google-chrome.deb && sudo apt-get install -f -y)",
-          "rm -f /tmp/google-chrome.deb",
-        ].join(" && ");
-
-        execSync(cmdInstalar, { stdio: "inherit", timeout: 240000 });
-        chromePath = verificarChromeLinux();
-        if (chromePath) {
-          console.log(`[Setup] Google Chrome instalado com sucesso: ${chromePath}`);
+        if (process.arch === "arm64") {
+          console.log("[Setup] Arquitetura ARM64: instalando Chromium via Snap/APT...");
+          try {
+            execSync("sudo snap install chromium", { stdio: "inherit", timeout: 180000 });
+          } catch (errSnap) {
+            console.log("[Setup] Snap falhou ou indisponível, tentando via PPA APT...");
+            execSync(
+              "sudo add-apt-repository -y ppa:saiarcot895/chromium-beta 2>/dev/null || true && " +
+              "sudo apt-get update -y && sudo apt-get install -y chromium-browser chromium",
+              { stdio: "inherit", timeout: 240000 }
+            );
+          }
         } else {
-          console.warn("[Setup] Instalação concluída, mas binário do Chrome ainda não detectado.");
+          console.log("[Setup] Arquitetura x86_64: instalando Google Chrome oficial...");
+          const cmdInstalar = [
+            "wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
+            "sudo apt-get update -y",
+            "sudo apt-get install -y /tmp/google-chrome.deb || (sudo dpkg -i /tmp/google-chrome.deb && sudo apt-get install -f -y)",
+            "rm -f /tmp/google-chrome.deb",
+          ].join(" && ");
+          execSync(cmdInstalar, { stdio: "inherit", timeout: 240000 });
+        }
+
+        browserPath = verificarNavegadorLinux();
+        if (browserPath) {
+          console.log(`[Setup] Navegador instalado com sucesso: ${browserPath}`);
+        } else {
+          console.warn("[Setup] Instalação executada, mas binário do navegador ainda não detectado.");
         }
       } catch (err) {
         console.warn(
-          "[Setup] Não foi possível instalar o Google Chrome automaticamente:",
+          "[Setup] Não foi possível instalar o navegador automaticamente:",
           err.message
         );
       }
     } else {
-      console.log(`[Setup] Google Chrome operacional detectado: ${chromePath}`);
+      console.log(`[Setup] Navegador operacional detectado: ${browserPath}`);
     }
 
     // 2. Verificar dependências de áudio do Python

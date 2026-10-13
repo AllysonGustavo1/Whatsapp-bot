@@ -50,11 +50,11 @@ async function obterCaminhoChrome() {
     }
   } else {
     const caminhosLinux = [
+      "/snap/bin/chromium",
       "/usr/bin/google-chrome-stable",
       "/usr/bin/google-chrome",
       "/opt/google/chrome/google-chrome",
       "/usr/bin/chromium",
-      "/snap/bin/chromium",
       "/usr/lib/chromium/chromium",
       "/usr/lib/chromium-browser/chromium-browser",
       "/usr/bin/chromium-browser",
@@ -176,7 +176,11 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
     }
   }
 
-  const tempAudioPath = path.join(os.tmpdir(), `recaptcha_${Date.now()}.mp3`);
+  const tempDir = path.join(os.homedir(), ".cacau-temp");
+  try {
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+  } catch (_) {}
+  const tempAudioPath = path.join(tempDir, `recaptcha_${Date.now()}.mp3`);
 
   try {
     const page = await browser.newPage();
