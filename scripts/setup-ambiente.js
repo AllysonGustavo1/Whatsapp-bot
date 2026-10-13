@@ -47,6 +47,15 @@ function verificarPythonAudio() {
   return false;
 }
 
+function temFfmpeg() {
+  try {
+    execSync("ffmpeg -version", { stdio: "ignore", timeout: 3000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function garantirAmbientePronto() {
   console.log(`[Setup] Verificando dependências do ambiente (${process.platform} ${process.arch})...`);
 
@@ -97,7 +106,23 @@ async function garantirAmbientePronto() {
       console.log(`[Setup] Navegador operacional detectado: ${browserPath}`);
     }
 
-    // 2. Verificar dependências de áudio do Python
+    // 2. Verificar ffmpeg (essencial para decodificação de MP3 no Ubuntu 20.04/Focal)
+    if (!temFfmpeg()) {
+      console.log("[Setup] ffmpeg ausente. Instalando via APT...");
+      try {
+        execSync("sudo apt-get update -y && sudo apt-get install -y ffmpeg", {
+          stdio: "inherit",
+          timeout: 120000,
+        });
+        console.log("[Setup] ffmpeg instalado com sucesso!");
+      } catch (errFfmpeg) {
+        console.warn("[Setup] Falha ao instalar ffmpeg:", errFfmpeg.message);
+      }
+    } else {
+      console.log("[Setup] ffmpeg operacional detectado.");
+    }
+
+    // 3. Verificar dependências de áudio do Python
     const audioOk = verificarPythonAudio();
     if (!audioOk) {
       console.log(

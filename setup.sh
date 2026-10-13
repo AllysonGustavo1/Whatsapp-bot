@@ -12,7 +12,7 @@ echo "[1/4] Atualizando repositórios do sistema..."
 sudo apt-get update -y
 
 echo "[2/4] Instalando dependências de sistema e Python..."
-sudo apt-get install -y wget curl gnupg libsndfile1 python3 python3-pip
+sudo apt-get install -y wget curl gnupg libsndfile1 python3 python3-pip ffmpeg
 
 echo "[3/4] Instalando módulos Python para transcrição de áudio..."
 pip3 install --break-system-packages soundfile SpeechRecognition 2>/dev/null || pip3 install soundfile SpeechRecognition
