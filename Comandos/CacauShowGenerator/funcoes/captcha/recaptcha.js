@@ -136,8 +136,13 @@ async function resolverRecaptchaRegistro({ onLog } = {}) {
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--disable-software-rasterizer",
+      "--disable-crash-reporter",
+      "--disable-breakpad",
+      "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
+      "--disable-ipc-flooding-protection",
       "--no-first-run",
       "--no-zygote",
+      "--single-process",
       "--window-size=1280,1200",
     ],
   };
