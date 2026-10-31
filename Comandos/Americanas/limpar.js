@@ -6,7 +6,8 @@ const { consultarPedidosConta } = require("./services/americanas");
 /**
  * Status que indicam que o pedido já foi resgatado / entregue ou finalizado
  */
-function isStatusResgatado(status) {
+function isStatusResgatado(status, resgatado = false) {
+  if (resgatado === true) return true;
   const s = String(status || "").toLowerCase().trim();
   return (
     s === "delivered" ||
@@ -17,6 +18,30 @@ function isStatusResgatado(status) {
     s === "concluido" ||
     s === "finalizado"
   );
+}
+
+/**
+ * Status que indicam que o pedido foi cancelado
+ */
+function isStatusCancelado(status) {
+  const s = String(status || "").toLowerCase().trim();
+  return (
+    s === "canceled" ||
+    s === "cancelled" ||
+    s === "cancelado" ||
+    s === "cancelada"
+  );
+}
+
+/**
+ * Retorna true se o pedido ainda estiver pendente de entrega / retirada
+ */
+function isPedidoPendente(p) {
+  if (!p) return false;
+  if (p.resgatado === true) return false;
+  if (isStatusResgatado(p.status, p.resgatado)) return false;
+  if (isStatusCancelado(p.status)) return false;
+  return true;
 }
 
 /**
@@ -56,7 +81,7 @@ async function executarLimparResgatados({ ownerId, onOutput = null } = {}) {
       const pedidos = res.pedidos || [];
 
       if (pedidos.length === 0) {
-        // Se a conta não tem pedidos (ou nunca comprou), mantemos ou perguntamos
+        // Se a conta não tem pedidos (ou nunca comprou), mantemos
         contasMantidas.push({
           email: c.email,
           motivo: "Nenhum pedido encontrado",
@@ -65,15 +90,11 @@ async function executarLimparResgatados({ ownerId, onOutput = null } = {}) {
         continue;
       }
 
-      // Verifica se todos os pedidos desta conta já foram resgatados
-      const temPedidoPendente = pedidos.some(
-        (p) =>
-          !isStatusResgatado(p.status) &&
-          (p.prontoParaRetirada === "sim" || p.status === "payment-approved" || (p.retirada && p.retirada !== "(não encontrado)"))
-      );
+      // Verifica se há algum pedido desta conta que ainda está pendente
+      const temPedidoPendente = pedidos.some(isPedidoPendente);
 
       if (!temPedidoPendente) {
-        // Todos os pedidos estão entregues/resgatados!
+        // Todos os pedidos estão entregues/resgatados ou cancelados!
         contasParaRemover.push({
           email: c.email,
           motivo: "Todos os pedidos já foram retirados/entregues",
@@ -111,7 +132,9 @@ async function executarLimparResgatados({ ownerId, onOutput = null } = {}) {
 
   if (contasParaRemover.length > 0) {
     for (const c of contasParaRemover) {
-      const pedidosStr = c.pedidos.map((p) => `${p.pedido} (${p.statusDescricao || p.status})`).join(", ");
+      const pedidosStr = c.pedidos
+        .map((p) => `${p.pedido} (${p.statusDescricao || p.status || "Retirado"})`)
+        .join(", ");
       linhas.push(`• \`${c.email}\` - ${pedidosStr || "Resgatado"}`);
     }
   } else {
@@ -123,8 +146,14 @@ async function executarLimparResgatados({ ownerId, onOutput = null } = {}) {
   if (contasMantidas.length > 0) {
     for (const c of contasMantidas) {
       const pendentes = c.pedidos
-        .filter((p) => p.prontoParaRetirada === "sim" || p.retirada)
-        .map((p) => `Cód: *${p.retirada}* (${p.prontoParaRetirada === "sim" ? "Pronto ✅" : "⏳"})`)
+        .filter(isPedidoPendente)
+        .map((p) => {
+          const cod = p.retirada && p.retirada !== "(não encontrado)" && p.retirada !== "(erro)"
+            ? `Cód: *${p.retirada}*`
+            : "Aguardando código";
+          const pronto = p.prontoParaRetirada === "sim" ? "Pronto ✅" : "⏳";
+          return `${cod} (${pronto})`;
+        })
         .join(" | ");
       linhas.push(`• \`${c.email}\`${pendentes ? ` - ${pendentes}` : ` (${c.motivo})`}`);
     }
@@ -141,4 +170,6 @@ async function executarLimparResgatados({ ownerId, onOutput = null } = {}) {
 module.exports = {
   executarLimparResgatados,
   isStatusResgatado,
+  isStatusCancelado,
+  isPedidoPendente,
 };

@@ -102,12 +102,17 @@ async function executarPedidos({
     "",
   ];
 
-  const aprovados = [];
-  const outros = [];
+  const prontosRetirada = [];
+  const emAndamento = [];
+  const resgatados = [];
 
   for (const p of todosPedidos) {
     const statusLimpo = p.statusDescricao || p.status || "(sem status)";
-    const prontoTxt = p.prontoParaRetirada === "sim" ? "Sim ✅" : "Não ⏳";
+    const prontoTxt = p.resgatado
+      ? "Já retirado / entregue ✅"
+      : p.prontoParaRetirada === "sim"
+      ? "Sim ✅"
+      : "Não ⏳";
     const retiradaTxt =
       p.retirada && p.retirada !== "(não encontrado)" && p.retirada !== "(erro)"
         ? `*${p.retirada}*`
@@ -125,29 +130,38 @@ async function executarPedidos({
       itemFormatado.push(`⚠️ *Obs:* ${p.obs}`);
     }
 
-    if (p.status === "payment-approved" || p.prontoParaRetirada === "sim") {
-      aprovados.push(itemFormatado.join("\n"));
+    if (p.resgatado) {
+      resgatados.push(itemFormatado.join("\n"));
+    } else if (p.prontoParaRetirada === "sim" || p.status === "payment-approved") {
+      prontosRetirada.push(itemFormatado.join("\n"));
     } else {
-      outros.push(itemFormatado.join("\n"));
+      emAndamento.push(itemFormatado.join("\n"));
     }
   }
 
-  if (aprovados.length > 0) {
-    linhas.push("📦 *Pedidos Aprovados / Retirada:*");
-    linhas.push(aprovados.join("\n\n"));
+  if (prontosRetirada.length > 0) {
+    linhas.push("📦 *Pedidos Prontos para Retirada:*");
+    linhas.push(prontosRetirada.join("\n\n"));
     linhas.push("");
   }
 
-  if (outros.length > 0) {
-    linhas.push("📋 *Outros Status / Erros:*");
-    linhas.push(outros.join("\n\n"));
+  if (emAndamento.length > 0) {
+    linhas.push("⏳ *Pedidos em Andamento / Aguardando:*");
+    linhas.push(emAndamento.join("\n\n"));
     linhas.push("");
   }
 
-  // Bloco rápido pedido:retirada
+  if (resgatados.length > 0) {
+    linhas.push("✅ *Pedidos Já Retirados / Entregues:*");
+    linhas.push(resgatados.join("\n\n"));
+    linhas.push("");
+  }
+
+  // Bloco rápido pedido:retirada (apenas para pedidos AINDA PENDENTES de retirada)
   const codigosValidos = todosPedidos
     .filter(
       (p) =>
+        !p.resgatado &&
         p.retirada &&
         p.retirada !== "(não encontrado)" &&
         p.retirada !== "(erro)"
@@ -155,7 +169,7 @@ async function executarPedidos({
     .map((p) => `${p.pedido}:${p.retirada}`);
 
   if (codigosValidos.length > 0) {
-    linhas.push("⚡ *Resumo Rápido (Pedido:Retirada):*");
+    linhas.push("⚡ *Resumo Rápido (Pedido:Retirada - Pendentes):*");
     linhas.push("```");
     linhas.push(codigosValidos.join("\n"));
     linhas.push("```");

@@ -709,6 +709,48 @@ function extractCodes(payload) {
 }
 
 /**
+ * Verifica se um pedido já foi retirado / entregue ou finalizado
+ */
+function verificarPedidoEntregue(orderData) {
+  if (!orderData || typeof orderData !== "object") return false;
+
+  const statusGeral = String(orderData.status || "").toLowerCase().trim();
+  if (
+    statusGeral === "delivered" ||
+    statusGeral === "retirado" ||
+    statusGeral === "entregue" ||
+    statusGeral === "completed" ||
+    statusGeral === "order-completed" ||
+    statusGeral === "concluido" ||
+    statusGeral === "finalizado"
+  ) {
+    return true;
+  }
+
+  const packages = orderData.packageAttachment?.packages;
+  if (Array.isArray(packages) && packages.length > 0) {
+    const todosEntregues = packages.every((pkg) => {
+      const courier = pkg?.courierStatus;
+      if (!courier) return false;
+      const statusCourier = String(courier.status || "").toLowerCase().trim();
+      return (
+        Boolean(courier.deliveredDate) ||
+        courier.finished === true ||
+        statusCourier === "delivered" ||
+        statusCourier === "entregue" ||
+        statusCourier === "retirado"
+      );
+    });
+
+    if (todosEntregues) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Consulta pedidos e códigos de retirada de uma única conta
  */
 async function consultarPedidosConta({ email, password, orderId = null, detalhado = false }) {
@@ -727,6 +769,7 @@ async function consultarPedidosConta({ email, password, orderId = null, detalhad
   for (const id of orderIds) {
     try {
       const data = await fetchOrder(id, jar);
+      const foiEntregue = verificarPedidoEntregue(data);
 
       if (detalhado && Array.isArray(data.items)) {
         for (const item of data.items) {
@@ -737,8 +780,10 @@ async function consultarPedidosConta({ email, password, orderId = null, detalhad
           produtos.push({
             conta: email,
             pedido: id,
-            status: data.status || "",
-            statusDescricao: data.statusDescription || data.status || "",
+            status: foiEntregue ? "delivered" : data.status || "",
+            statusDescricao: foiEntregue
+              ? "Retirado / Entregue"
+              : data.statusDescription || data.status || "",
             produto: item.name || "(sem nome)",
             quantidade: quantity,
             precoUnitario: unitPrice,
@@ -752,9 +797,18 @@ async function consultarPedidosConta({ email, password, orderId = null, detalhad
         conta: email,
         pedido: row.pedido === "(não encontrado)" ? id : row.pedido,
         retirada: takeout.takeoutToken || row.retirada,
-        prontoParaRetirada: takeout.isReadyForPickup === true ? "sim" : takeout.isReadyForPickup === false ? "nao" : "(indisponivel)",
-        status: data.status || row.status,
-        statusDescricao: data.statusDescription || data.status || "",
+        prontoParaRetirada: foiEntregue
+          ? "retirado"
+          : takeout.isReadyForPickup === true
+          ? "sim"
+          : takeout.isReadyForPickup === false
+          ? "nao"
+          : "(indisponivel)",
+        resgatado: foiEntregue,
+        status: foiEntregue ? "delivered" : data.status || row.status,
+        statusDescricao: foiEntregue
+          ? "Retirado / Entregue"
+          : data.statusDescription || data.status || "",
       }));
 
       if (codes.length === 0) {
@@ -762,9 +816,18 @@ async function consultarPedidosConta({ email, password, orderId = null, detalhad
           conta: email,
           pedido: id,
           retirada: takeout.takeoutToken || "(não encontrado)",
-          prontoParaRetirada: takeout.isReadyForPickup === true ? "sim" : takeout.isReadyForPickup === false ? "nao" : "(indisponivel)",
-          status: data.status || "(sem status)",
-          statusDescricao: data.statusDescription || data.status || "",
+          prontoParaRetirada: foiEntregue
+            ? "retirado"
+            : takeout.isReadyForPickup === true
+            ? "sim"
+            : takeout.isReadyForPickup === false
+            ? "nao"
+            : "(indisponivel)",
+          resgatado: foiEntregue,
+          status: foiEntregue ? "delivered" : data.status || "(sem status)",
+          statusDescricao: foiEntregue
+            ? "Retirado / Entregue"
+            : data.statusDescription || data.status || "",
         });
       } else {
         pedidos.push(...codes);
@@ -775,6 +838,7 @@ async function consultarPedidosConta({ email, password, orderId = null, detalhad
         pedido: id,
         retirada: "(erro)",
         prontoParaRetirada: "nao",
+        resgatado: false,
         status: "(erro)",
         obs: errOrder.message,
       });
@@ -801,4 +865,5 @@ module.exports = {
   fetchOrdersList,
   fetchOrder,
   fetchTakeoutToken,
+  verificarPedidoEntregue,
 };
