@@ -72,6 +72,27 @@ Salva seus dados uma única vez para não precisar digitá-los a cada criação 
 #### 5. Listar Contas Salvas (`/americanas contas`)
 - `/americanas contas` — lista os e-mails e senhas de todas as contas ativas do usuário.
 
+### Burger King Grelha (`/bk`, `/grelha`)
+
+Cria automaticamente uma conta descartável no Mail.tm, autentica no Nox (`Nox_5` por padrão) via ADB + DevTools WebView, gira a Grelha (Shake & Win) do Burger King e retorna no WhatsApp:
+1. A **imagem do prêmio** ganho com `JACKPOT!` (quando a recompensa for item grátis e não promoção de preço), `PREMIO: ... | Codigo: ...` e `Conta: cpf:senha`;
+2. O **QR Code em imagem** em seguida sem descrição, pronto para escanear.
+
+- Contas geradas e tokens ficam salvos em `Comandos/BkGrelha/contas.txt` e `Comandos/BkGrelha/dados/sessoes.json`.
+- O modo opcional `/bk txt` (ou `/bk ler`) também permite girar contas previamente salvas em `Comandos/BkGrelha/contas.txt` (`email:senha`, `email:senha:cpf`, `email`, `email|refresh_token` ou JWT).
+
+Comandos no WhatsApp:
+- `/bk` ou `/grelha` (ou `/bk girar [qtd]` / `/bk criar [qtd]`) — cria conta(s) via Mail.tm + Nox, gira a grelha e envia imagem do prêmio (`JACKPOT!`, `PREMIO: ... | Codigo: ...`, `Conta: cpf:senha`) e QR Code sem descrição.
+- `/bk txt` (ou `/bk ler`) — gira todas as contas do `contas.txt`.
+- `/bk contas` — lista as contas e o status das sessões salvas.
+- `/bk add <conta>` — adiciona uma ou mais linhas no `contas.txt` (aceita múltiplas linhas).
+- `/bk help` — exibe a ajuda do módulo.
+
+Execução via terminal (CLI):
+- `npm run bk` — cria uma conta descartável Mail.tm, gira a grelha e gera as imagens de prêmio e QR Code.
+- `node Comandos/BkGrelha/cli.js txt --arquivo caminho.txt --fechar` — gira as contas de um arquivo `.txt` e fecha o Nox ao terminar.
+- `node Comandos/BkGrelha/cli.js contas` — lista as contas/sessões.
+
 ---
 
 ## Configuração de Comandos e Permissões
@@ -85,7 +106,8 @@ Edite o arquivo `comandos-config.json` para ligar/desligar comandos e definir qu
   "cacaushow": { "ativo": true, "autorizados": ["*"] },
   "encurtar": { "ativo": true, "autorizados": ["*"] },
   "fuel": { "ativo": true, "autorizados": ["*"] },
-  "boticariomimo": { "ativo": true, "autorizados": ["558487672874"] }
+  "boticariomimo": { "ativo": true, "autorizados": ["558487672874"] },
+  "bk": { "ativo": true, "autorizados": ["*"] }
 }
 ```
 
@@ -117,6 +139,6 @@ Quando `SALVAR_REQUISICOES_TXT = true` (definido no `index.js`), os logs do `/ca
 
 ## Observações
 
-- A pasta `auth_info_baileys/` contém as credenciais da sessão — não a versione no Git.
 - A pasta `Comandos/Americanas/dados/` armazena as contas e perfis locais e está no `.gitignore`.
+- Os arquivos `Comandos/BkGrelha/contas.txt` e `Comandos/BkGrelha/dados/` contêm contas e tokens locais do BK e também estão no `.gitignore`.
 - Para forçar uma nova autenticação, delete a pasta `auth_info_baileys/` e reinicie o bot.

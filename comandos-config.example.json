@@ -23,5 +23,9 @@
     "ativo": true,
     "autorizados": ["*"]
   },
+  "bk": {
+    "ativo": true,
+    "autorizados": ["*"]
+  },
   "nomeConexao": null
 }

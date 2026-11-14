@@ -1,0 +1,14 @@
+# Lista de contas do Burger King Brasil para girar a Grelha (uma conta por linha)
+# Linhas vazias e comentarios iniciados com # sao ignorados.
+#
+# Formatos aceitos:
+#   email:senha                 (login via emulador usando Mail.tm para pegar o codigo OTP)
+#   email:senha:cpf             (mesmo acima, informando CPF caso seja conta nova)
+#   email                       (usa sessao salva em dados/sessoes.json, ou tenta senhas padrao Mail.tm)
+#   email|refresh_token         (importa refresh_token direto + associa ao email)
+#   eyJ...                      (refresh_token ou access_token JWT direto)
+#
+# Copie este arquivo para contas.txt e adicione suas contas reais abaixo:
+# exemplo1@sharebot.net:BkGrelha2024@
+# exemplo2@fldubai.com:MinhaSenha123
+# eyJhbGciOiJIUzUxMiIsInR5cCIgOiAiSldUIiw...

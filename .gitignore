@@ -26,6 +26,8 @@ test-*.js
 boticariomimo-monitores.json
 *-monitores.json
 Comandos/Americanas/dados/
+Comandos/BkGrelha/dados/
+Comandos/BkGrelha/contas.txt
 
 # Variaveis de ambiente
 .env

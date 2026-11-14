@@ -49,6 +49,14 @@ const {
   executarPerfil,
   obterContasUsuario,
 } = require("./Comandos/Americanas");
+const {
+  buildBkHelpMessage,
+  parseBkCommand,
+  executarGiroGrelha,
+  listarContasStatus,
+  executarAdicionarContas,
+  executarCriarContasBk,
+} = require("./Comandos/BkGrelha");
 const qrcode = require("qrcode-terminal");
 const pino = require("pino");
 
@@ -79,6 +87,7 @@ const COMMANDS = {
   fuel: ["fuel"],
   boticariomimo: ["boticariomimo", "boticario", "mimo"],
   americanas: ["americanas", "ame"],
+  bk: ["bk", "bkgrelha", "grelha"],
 };
 
 const DEFAULT_COMMANDS_CONFIG = {
@@ -92,6 +101,7 @@ const DEFAULT_COMMANDS_CONFIG = {
     campanha: "floratta-blue-crystal-14-2026",
   },
   americanas: { ativo: true, autorizados: ["*"] },
+  bk: { ativo: true, autorizados: ["*"] },
 };
 
 // ─── Utilitários de status e permissões ───────────────────────────────────────
@@ -235,6 +245,7 @@ function buildHelpMessage(config) {
     `/fuel {p.gasolina} {p.etanol} {km/l gas} {km/l eta} - ${label("fuel")}`,
     `/boticariomimo [cidade] - ${label("boticariomimo")}`,
     `/americanas - ${label("americanas")}`,
+    `/bk - ${label("bk")}`,
   ].join("\n");
 }
 
@@ -338,6 +349,17 @@ async function sendTextWithLog(sock, to, text) {
   await sock.sendMessage(to, { text: output });
 }
 
+async function sendImageWithLog(sock, to, imageBuffer, caption = "") {
+  const legenda = caption ? String(caption).trim() : "";
+  console.log(
+    `[RES-IMG] ${to}: ${legenda || "(sem legenda)"} (${imageBuffer?.length || 0} bytes)`
+  );
+  const payload = legenda
+    ? { image: imageBuffer, caption: legenda }
+    : { image: imageBuffer };
+  await sock.sendMessage(to, payload);
+}
+
 // ─── Handler de mensagens ─────────────────────────────────────────────────────
 
 async function handleMessage(sock, message) {
@@ -377,6 +399,7 @@ async function handleMessage(sock, message) {
     const fuelData = parseFuelCommand(content, PREFIX, COMMANDS.fuel);
     const boticarioMimoData = parseBoticarioMimoCommand(content);
     const americanasData = parseAmericanasCommand(content, PREFIX);
+    const bkData = parseBkCommand(content, PREFIX);
 
     logRequest(from, content);
 
@@ -808,63 +831,235 @@ async function handleMessage(sock, message) {
       );
       return;
     }
+
+    // /bk | /grelha [girar [qtd] | criar [qtd] | txt | contas | add | help]
+    if (bkData) {
+      if (!(await checkCommandAccess("bk"))) return;
+
+      if (bkData.action === "help") {
+        await sendTextWithLog(sock, from, buildBkHelpMessage(PREFIX));
+        return;
+      }
+
+      if (bkData.action === "contas") {
+        await sendTextWithLog(sock, from, listarContasStatus());
+        return;
+      }
+
+      if (bkData.action === "add") {
+        const msg = await executarAdicionarContas({ argTexto: bkData.argTexto });
+        await sendTextWithLog(sock, from, msg);
+        return;
+      }
+
+      if (
+        bkData.action === "girar" ||
+        bkData.action === "criar" ||
+        bkData.action === "txt"
+      ) {
+        if (runningByChat.has(from)) {
+          await sendTextWithLog(
+            sock,
+            from,
+            "⏳ Já existe uma operação em andamento para este chat. Aguarde a finalização."
+          );
+          return;
+        }
+
+        const enviarSaidaBk = async (payload) => {
+          if (payload && typeof payload === "object" && Buffer.isBuffer(payload.image)) {
+            await sendImageWithLog(sock, from, payload.image, payload.caption || "");
+          } else if (payload) {
+            await sendTextWithLog(sock, from, String(payload));
+          }
+        };
+
+        runningByChat.add(from);
+        try {
+          if (bkData.action === "txt") {
+            await executarGiroGrelha({
+              onOutput: enviarSaidaBk,
+            });
+          } else {
+            await executarCriarContasBk({
+              quantidade: bkData.quantidade || 1,
+              girar: true,
+              onOutput: enviarSaidaBk,
+            });
+          }
+        } catch (error) {
+          console.error("Erro no /bk:", error);
+          await sendTextWithLog(
+            sock,
+            from,
+            `❌ Erro no comando BK Grelha: ${error.message || "Erro desconhecido"}`
+          );
+        } finally {
+          runningByChat.delete(from);
+        }
+        return;
+      }
+
+      await sendTextWithLog(
+        sock,
+        from,
+        "⚠️ Subcomando BK não reconhecido.\n\n" + buildBkHelpMessage(PREFIX)
+      );
+      return;
+    }
   } catch (error) {
     console.error("Erro ao processar mensagem:", error);
   }
 }
 
 // ─── Conexão com o Baileys ────────────────────────────────────────────────────
+//
+// Regras importantes para o bot não "morrer" em silêncio:
+//  - Só pode existir UM socket ativo. Antes, cada queda criava um socket novo sem
+//    fechar o anterior; os sockets antigos continuavam vivos, disputavam a mesma
+//    sessão, se derrubavam (código 500/428/440) e corrompiam as chaves de
+//    criptografia — e as mensagens/comandos deixavam de ser lidos.
+//  - Só pode existir UMA reconexão agendada por vez, com espera crescente.
+//  - Se ficar muito tempo sem conexão aberta, o processo sai e o pm2 reinicia.
+
+let currentSock = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+let lastOpenAt = Date.now();
+let cachedVersion = null;
+const sentMessagesCache = new Map(); // usado pelo getMessage (reenvio/retry)
+const WATCHDOG_MAX_OFFLINE_MS = 5 * 60 * 1000;
+
+function cacheSentMessage(msg) {
+  if (!msg?.key?.id || !msg.message) return;
+  sentMessagesCache.set(msg.key.id, msg.message);
+  if (sentMessagesCache.size > 500) {
+    sentMessagesCache.delete(sentMessagesCache.keys().next().value);
+  }
+}
+
+function encerrarSocket(sock) {
+  if (!sock) return;
+  try {
+    sock.ev.removeAllListeners();
+  } catch (_) {}
+  try {
+    sock.end(undefined);
+  } catch (_) {}
+}
+
+function agendarReconexao(motivo) {
+  if (reconnectTimer) return; // já existe uma reconexão agendada
+  reconnectAttempts++;
+  const delay = Math.min(3000 * 2 ** (reconnectAttempts - 1), 60000);
+  console.log(
+    `🔁 Reconectando em ${Math.round(delay / 1000)}s (tentativa ${reconnectAttempts}, motivo: ${motivo})`
+  );
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      await connectToWhatsApp();
+    } catch (error) {
+      console.error("❌ Erro ao reconectar:", error?.message || error);
+      agendarReconexao("erro ao reconectar");
+    }
+  }, delay);
+}
+
+async function obterVersao() {
+  if (cachedVersion) return cachedVersion;
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    cachedVersion = version;
+  } catch (error) {
+    console.warn("⚠️ Não foi possível buscar a versão do WhatsApp Web:", error?.message);
+  }
+  return cachedVersion || undefined;
+}
 
 async function connectToWhatsApp() {
+  // Garante que o socket anterior está realmente morto antes de abrir outro
+  encerrarSocket(currentSock);
+  currentSock = null;
+
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
-  const { version } = await fetchLatestBaileysVersion();
+  const version = await obterVersao();
 
   const nomeConexao = getConnectionName();
   console.log(`🔌 Conectando ao WhatsApp como: "${nomeConexao}"`);
 
   const sock = makeWASocket({
-    version,
+    ...(version ? { version } : {}),
     auth: state,
     // Logger silencioso — mude para 'info' ou 'debug' se quiser mais detalhes
     logger: pino({ level: "silent" }),
     printQRInTerminal: false, // exibimos manualmente via qrcode-terminal
     browser: [nomeConexao, "Chrome", "1.0.0"],
     syncFullHistory: false,
+    markOnlineOnConnect: false,
+    keepAliveIntervalMs: 20000,
+    connectTimeoutMs: 60000,
     shouldIgnoreJid: (jid) => isJidBroadcast(jid),
-    getMessage: async (key) => undefined,
+    getMessage: async (key) => sentMessagesCache.get(key.id),
   });
+  currentSock = sock;
 
-  // Exibe QR Code no terminal
+  // Guarda as mensagens que o bot envia, para o WhatsApp conseguir pedir reenvio
+  const originalSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (...args) => {
+    const sent = await originalSendMessage(...args);
+    cacheSentMessage(sent);
+    return sent;
+  };
+
   sock.ev.on("connection.update", async (update) => {
+    if (sock !== currentSock) return; // evento de um socket antigo: ignora
+
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
+      lastOpenAt = Date.now(); // aguardando leitura do QR não conta como "offline"
       console.log("\n📱 Escaneie o QR Code abaixo com o WhatsApp:\n");
       qrcode.generate(qr, { small: true });
     }
 
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
       console.log(
-        `🔌 Conexão encerrada (código ${statusCode}). Reconectando: ${shouldReconnect}`
+        `🔌 Conexão encerrada (código ${statusCode}) em ${new Date().toISOString()}`
       );
 
-      if (shouldReconnect) {
-        // Aguarda 3 segundos antes de tentar reconectar
-        setTimeout(connectToWhatsApp, 3000);
-      } else {
-        console.log(
-          "🚪 Sessão encerrada (logout). Apague a pasta auth_info_baileys e reinicie."
-        );
+      encerrarSocket(sock);
+      currentSock = null;
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        // Sessão invalidada pelo WhatsApp: guarda a pasta antiga como backup e
+        // abre uma sessão nova, que mostra o QR Code no log (pm2 logs whatsappBotSunga).
+        const backup = `${AUTH_FOLDER}.logout-${Date.now()}`;
+        try {
+          if (fs.existsSync(AUTH_FOLDER)) fs.renameSync(AUTH_FOLDER, backup);
+          console.log(
+            `🚪 WhatsApp informou logout (401). Sessão antiga movida para ${backup}. Escaneie o novo QR Code com o celular.`
+          );
+        } catch (error) {
+          console.error("Erro ao mover a sessão antiga:", error?.message);
+        }
+        lastOpenAt = Date.now() + 10 * 60 * 1000; // dá tempo para ler o QR antes do watchdog agir
+        agendarReconexao("logout");
+        return;
       }
+
+      agendarReconexao(`código ${statusCode}`);
     }
 
     if (connection === "open") {
-      console.log("✅ Allysongs Bot conectado ao WhatsApp com sucesso!");
+      reconnectAttempts = 0;
+      lastOpenAt = Date.now();
+      console.log(
+        `✅ Allysongs Bot conectado ao WhatsApp com sucesso! (${new Date().toISOString()})`
+      );
       monitorBoticario.iniciar({
-        getSock: () => sock,
+        getSock: () => currentSock,
         sendTextWithLog,
       });
       iniciarAgendadorDiarioCampanha();
@@ -874,14 +1069,40 @@ async function connectToWhatsApp() {
   // Salva credenciais sempre que atualizadas
   sock.ev.on("creds.update", saveCreds);
 
-  // Processa mensagens recebidas (tanto mensagens recebidas 'notify' quanto sincronizadas do celular 'append')
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+  // Processa mensagens recebidas (tanto 'notify' quanto 'append').
+  // Cada mensagem roda em paralelo: um comando demorado (puppeteer etc.)
+  // não trava mais a fila de todos os outros comandos.
+  sock.ev.on("messages.upsert", ({ messages, type }) => {
     if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
-      await handleMessage(sock, msg);
+      handleMessage(sock, msg).catch((error) =>
+        console.error("Erro ao processar mensagem:", error)
+      );
     }
   });
 }
+
+// Watchdog: se ficar muito tempo sem conexão aberta, sai e deixa o pm2 reiniciar
+setInterval(() => {
+  const conectado = currentSock?.ws?.isOpen ?? false;
+  if (conectado) {
+    lastOpenAt = Date.now();
+    return;
+  }
+  if (Date.now() - lastOpenAt > WATCHDOG_MAX_OFFLINE_MS) {
+    console.error("⏱️ Sem conexão com o WhatsApp há mais de 5 minutos. Reiniciando processo.");
+    process.exit(1);
+  }
+}, 30000).unref();
+
+// Erros soltos não devem derrubar o bot sem log
+process.on("unhandledRejection", (reason) => {
+  console.error("⚠️ unhandledRejection:", reason?.message || reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("💥 uncaughtException:", error);
+  process.exit(1);
+});
 
 // ─── Inicialização ────────────────────────────────────────────────────────────
 
