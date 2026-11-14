@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "setup": "node scripts/setup-ambiente.js",
-    "bk": "node Comandos/BkGrelha/cli.js"
+    "bk": "node Comandos/BkGrelha/cli.js",
+    "bk:worker": "node Comandos/BkGrelha/workerServer.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.18",

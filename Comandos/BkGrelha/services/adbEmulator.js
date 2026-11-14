@@ -3,6 +3,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 const puppeteer = require("puppeteer");
 const { gerarCPF } = require("../../Americanas/utils/generators");
+const { httpRequestJson } = require("./bkApi");
 const { snapshotMensagensEmail, aguardarCodigoBk } = require("./emailCode");
 
 const PKG_BK = "burgerking.com.br.appandroid";
@@ -605,16 +606,116 @@ async function completarPosLoginNativo(adbPath, serial, { cpf, onLog }) {
   );
 }
 
+async function autenticarContaViaWorker({ email, senha, cpf, onLog } = {}) {
+  const log = typeof onLog === "function" ? onLog : () => {};
+  const workerBase = (
+    process.env.BK_WORKER_URL || "http://127.0.0.1:3847"
+  ).replace(/\/+$/, "");
+  const endpoint = `${workerBase}/auth`;
+  const timeoutMs = Number(process.env.BK_WORKER_TIMEOUT_MS) || 180000;
+
+  log(`Solicitando autenticacao de ${email} ao Worker BK (${endpoint})...`);
+
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  if (process.env.BK_WORKER_TOKEN) {
+    headers["x-bk-worker-token"] = process.env.BK_WORKER_TOKEN;
+  }
+
+  let res;
+  try {
+    res = await httpRequestJson(
+      endpoint,
+      { method: "POST", headers },
+      JSON.stringify({ email, senha, cpf }),
+      timeoutMs
+    );
+  } catch (err) {
+    const errIndisp = new Error(
+      `Worker BK indisponivel (${err?.message || "falha de conexao"}).`
+    );
+    errIndisp.code = "WORKER_UNAVAILABLE";
+    throw errIndisp;
+  }
+
+  if (res.status >= 502 && res.status <= 504) {
+    const errIndisp = new Error(`Worker BK indisponivel (HTTP ${res.status}).`);
+    errIndisp.code = "WORKER_UNAVAILABLE";
+    throw errIndisp;
+  }
+
+  const dados = res.data;
+  if (res.status >= 400 || !dados?.ok || !dados?.accessToken) {
+    const msg =
+      (typeof dados === "object" && (dados?.error || dados?.message)) ||
+      `Worker BK retornou HTTP ${res.status}`;
+    const err = new Error(msg);
+    if (typeof dados === "object" && dados?.code) {
+      err.code = dados.code;
+    }
+    throw err;
+  }
+
+  return {
+    accessToken: dados.accessToken,
+    refreshToken: dados.refreshToken || null,
+    user: dados.user || null,
+    customerId: dados.customerId || null,
+    email: dados.email ? String(dados.email).toLowerCase() : email,
+    cpf: dados.cpf || cpf || null,
+    customerStatus: dados.customerStatus || "ACTIVE",
+    metodoWorker: true,
+  };
+}
+
+async function garantirAdbOuDelegar({ email, senha, cpf, permitirWorker, log }) {
+  if (permitirWorker && process.env.BK_USE_WORKER === "1") {
+    return {
+      delegado: true,
+      sessao: await autenticarContaViaWorker({ email, senha, cpf, onLog: log }),
+    };
+  }
+
+  try {
+    await encontrarAdb();
+  } catch (errAdb) {
+    if (!permitirWorker || process.env.BK_DISABLE_WORKER === "1") {
+      throw errAdb;
+    }
+    log("ADB nao disponivel localmente; delegando autenticacao para o Worker remoto...");
+    return {
+      delegado: true,
+      sessao: await autenticarContaViaWorker({ email, senha, cpf, onLog: log }),
+    };
+  }
+
+  return { delegado: false, sessao: null };
+}
+
 async function autenticarContaNoEmulador({
   email,
   senha,
   cpf,
   onLog,
   adbPortForward = 9229,
+  permitirWorker = true,
 } = {}) {
   const log = typeof onLog === "function" ? onLog : () => {};
   if (!email) {
     throw new Error("Email obrigatorio para login via emulador.");
+  }
+
+  const checagemWorker = await garantirAdbOuDelegar({
+    email,
+    senha,
+    cpf,
+    permitirWorker,
+    log,
+  });
+  if (checagemWorker.delegado) {
+    return checagemWorker.sessao;
   }
 
   const { adbPath, serial } = await garantirEmuladorPronto({ onLog: log });
@@ -851,5 +952,6 @@ module.exports = {
   garantirEmuladorPronto,
   encerrarNox,
   extrairAuthSession,
+  autenticarContaViaWorker,
   autenticarContaNoEmulador,
 };

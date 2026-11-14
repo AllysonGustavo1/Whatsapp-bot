@@ -533,6 +533,7 @@ module.exports = {
   TOKEN_URL,
   HOME_BASE_URL,
   SHAKE_BASE_URL,
+  httpRequestJson,
   decodificarJwt,
   tokenEstaExpirado,
   renovarToken,

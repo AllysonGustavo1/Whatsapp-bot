@@ -24,6 +24,7 @@ const {
   resolverCaminhoContas,
   lerContasTxt,
   adicionarContasTxt,
+  lerSessoes,
   obterSessaoConta,
   salvarSessaoConta,
 } = require("./storage");
@@ -217,12 +218,15 @@ async function obterCredenciaisAtivas(conta, { onLog, forcarEmulador = false } =
     cpf: sessaoAdb.cpf || cpfAtual,
   };
 
+  const origemAuth = sessaoAdb.metodoWorker ? "worker-nox" : "adb-emulator";
+  const metodoAuth = sessaoAdb.metodoWorker ? "worker" : "emulador";
+
   salvarSessaoConta(conta.chave, {
     ...finalCreds,
-    origem: "adb-emulator",
+    origem: origemAuth,
   });
 
-  return { ...finalCreds, metodoAuth: "emulador" };
+  return { ...finalCreds, metodoAuth };
 }
 
 async function montarResultadoGiro({
@@ -670,6 +674,141 @@ async function executarAdicionarContas({ argTexto, arquivoTxt = null }) {
   );
 }
 
+function ehErroIndisponibilidadeAuth(err) {
+  const code = String(err?.code || "").toUpperCase();
+  if (code === "WORKER_UNAVAILABLE" || code === "ADB_NOT_FOUND") return true;
+  const msg = String(err?.message || "");
+  return /ADB nao encontrado|Worker BK indisponivel|ECONNREFUSED/i.test(msg);
+}
+
+function foiGiradaHoje(sessao) {
+  if (!sessao?.ultimoGiroEm) return false;
+  const dtGiro = new Date(sessao.ultimoGiroEm);
+  if (Number.isNaN(dtGiro.getTime())) return false;
+  return dtGiro.toDateString() === new Date().toDateString();
+}
+
+function coletarCandidatosPool(arquivoTxt) {
+  const candidatos = [];
+  const chavesVistas = new Set();
+
+  const { contas } = lerContasTxt(arquivoTxt);
+  for (const c of contas) {
+    const sessao = obterSessaoConta(c);
+    const refresh = c.refreshToken || sessao?.refreshToken || null;
+    const accessValido =
+      (c.accessToken && !tokenEstaExpirado(c.accessToken, 90) && c.customerId) ||
+      (sessao?.accessToken &&
+        !tokenEstaExpirado(sessao.accessToken, 90) &&
+        (sessao.customerId || c.customerId));
+    if (!refresh && !accessValido) continue;
+    chavesVistas.add(c.chave);
+    candidatos.push({
+      conta: c,
+      sessao,
+      jaGirouHoje: foiGiradaHoje(sessao),
+      atualizadoTs: Date.parse(sessao?.atualizadoEm || 0) || 0,
+    });
+  }
+
+  const db = lerSessoes();
+  for (const [chave, sessao] of Object.entries(db.contas || {})) {
+    if (!sessao || typeof sessao !== "object") continue;
+    const keyNorm = chave.includes("@") ? chave.toLowerCase() : chave;
+    if (chavesVistas.has(keyNorm)) continue;
+    const accessValido =
+      sessao.accessToken &&
+      !tokenEstaExpirado(sessao.accessToken, 90) &&
+      sessao.customerId;
+    if (!sessao.refreshToken && !accessValido) continue;
+
+    chavesVistas.add(keyNorm);
+    candidatos.push({
+      conta: {
+        tipo: "email",
+        chave: keyNorm,
+        email: sessao.email || (keyNorm.includes("@") ? keyNorm : null),
+        senha: null,
+        cpf: sessao.cpf || null,
+        customerId: sessao.customerId || null,
+        accessToken: sessao.accessToken || null,
+        refreshToken: sessao.refreshToken || null,
+      },
+      sessao,
+      jaGirouHoje: foiGiradaHoje(sessao),
+      atualizadoTs: Date.parse(sessao.atualizadoEm || 0) || 0,
+    });
+  }
+
+  candidatos.sort((a, b) => {
+    if (a.jaGirouHoje !== b.jaGirouHoje) return a.jaGirouHoje ? 1 : -1;
+    return b.atualizadoTs - a.atualizadoTs;
+  });
+
+  return candidatos;
+}
+
+async function girarContaDisponivelDoPool({
+  arquivoTxt = null,
+  girar = true,
+  log = () => {},
+  chavesJaUsadas = new Set(),
+} = {}) {
+  const candidatos = coletarCandidatosPool(arquivoTxt).filter(
+    (item) => !chavesJaUsadas.has(item.conta.chave)
+  );
+  if (candidatos.length === 0) return null;
+
+  let melhorJaGirou = null;
+  for (const { conta } of candidatos) {
+    try {
+      if (!girar) {
+        const creds = await obterCredenciaisAtivas(conta, { onLog: log });
+        chavesJaUsadas.add(conta.chave);
+        return {
+          conta: creds.email || conta.chave,
+          status: "sucesso",
+          metodoAuth: `${creds.metodoAuth || "refresh_token"}+pool`,
+          resumo: `Conta autenticada via pool (ID: ${creds.customerId})`,
+          premio: null,
+          cupom: null,
+        };
+      }
+
+      const res = await processarContaGrelha(conta, { onLog: log });
+      if (res.status === "sucesso") {
+        chavesJaUsadas.add(conta.chave);
+        return {
+          ...res,
+          metodoAuth: `${res.metodoAuth || "refresh_token"}+pool`,
+        };
+      }
+      if (
+        res.status === "ja_girou" &&
+        (res.cupom || res.premio) &&
+        (!melhorJaGirou || (!melhorJaGirou.cupom && res.cupom))
+      ) {
+        melhorJaGirou = {
+          ...res,
+          chavePool: conta.chave,
+          metodoAuth: `${res.metodoAuth || "refresh_token"}+pool`,
+        };
+      }
+    } catch (errPool) {
+      log(`Conta do pool (${conta.chave}) indisponivel no fallback: ${errPool.message}`);
+    }
+  }
+
+  if (melhorJaGirou) {
+    const chave = melhorJaGirou.chavePool;
+    delete melhorJaGirou.chavePool;
+    if (chave) chavesJaUsadas.add(chave);
+    return melhorJaGirou;
+  }
+
+  return null;
+}
+
 async function executarCriarContasBk({
   quantidade = 1,
   girar = true,
@@ -685,13 +824,18 @@ async function executarCriarContasBk({
   );
 
   const resultados = [];
+  const chavesFallbackUsadas = new Set();
+
   for (let i = 0; i < qtd; i += 1) {
+    let email = null;
+    let senha = "BkGrelha2024@";
+    const cpf = gerarCPF();
+    const logFn = (msg) => console.log(`[BK-Criar][${email || `#${i + 1}`}] ${msg}`);
+
     try {
-      const criado = await criarEmailTemporarioBk("BkGrelha2024@");
-      const email = criado.email;
-      const senha = criado.senha || criado.senhaMailbox || "BkGrelha2024@";
-      const cpf = gerarCPF();
-      adicionarContasTxt([`${email}:${senha}:${cpf}`], arquivoTxt);
+      const criado = await criarEmailTemporarioBk(senha);
+      email = criado.email;
+      senha = criado.senha || criado.senhaMailbox || senha;
 
       const conta = {
         tipo: "email",
@@ -701,13 +845,23 @@ async function executarCriarContasBk({
         cpf,
       };
 
-      const logFn = (msg) => console.log(`[BK-Criar][${email}] ${msg}`);
       if (girar) {
         const giro = await processarContaGrelha(conta, { onLog: logFn });
+        const sessaoSalva = obterSessaoConta(conta);
+        if (sessaoSalva?.refreshToken || sessaoSalva?.accessToken) {
+          adicionarContasTxt(
+            [`${email}:${senha}:${giro.cpf || cpf}`],
+            arquivoTxt
+          );
+        }
         resultados.push(giro);
         await enviarMidiasResultado(send, giro);
       } else {
         const creds = await obterCredenciaisAtivas(conta, { onLog: logFn });
+        adicionarContasTxt(
+          [`${creds.email || email}:${senha}:${creds.cpf || cpf}`],
+          arquivoTxt
+        );
         resultados.push({
           conta: creds.email || email,
           status: "sucesso",
@@ -718,6 +872,23 @@ async function executarCriarContasBk({
         });
       }
     } catch (err) {
+      if (ehErroIndisponibilidadeAuth(err)) {
+        logFn(`Autenticacao remota indisponivel (${err.message}); acionando pool salvo...`);
+        const fallback = await girarContaDisponivelDoPool({
+          arquivoTxt,
+          girar,
+          log: logFn,
+          chavesJaUsadas: chavesFallbackUsadas,
+        });
+        if (fallback) {
+          resultados.push(fallback);
+          if (girar) {
+            await enviarMidiasResultado(send, fallback);
+          }
+          continue;
+        }
+      }
+
       resultados.push({
         conta: `Nova conta #${i + 1}`,
         status: "erro",
