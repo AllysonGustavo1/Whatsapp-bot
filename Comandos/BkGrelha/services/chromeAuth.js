@@ -137,8 +137,15 @@ async function clicarSubmit(page, textoPreferido = "Continuar") {
       .evaluate((el) => el.innerText || el.textContent || "", btn)
       .catch(() => "");
     if (!rx || rx.test(txt)) {
-      await btn.click().catch(() => {});
-      return true;
+      try {
+        await btn.evaluate((el) =>
+          el.scrollIntoView?.({ block: "center" })
+        );
+        await btn.click();
+        return true;
+      } catch {
+        // cai no fallback via DOM
+      }
     }
   }
   return page.evaluate((texto) => {
@@ -326,6 +333,7 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-infobars",
+    "--lang=pt-BR",
     "--window-size=460,820",
   ];
   if (process.platform === "linux") {
@@ -354,6 +362,26 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
     if (ua.includes("HeadlessChrome")) {
       await page.setUserAgent(ua.replace(/HeadlessChrome/g, "Chrome"));
     }
+    await page.setViewport({ width: 460, height: 820 }).catch(() => {});
+    await page
+      .setExtraHTTPHeaders({
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+      })
+      .catch(() => {});
+    await page.emulateTimezone("America/Sao_Paulo").catch(() => {});
+
+    let ultimoErroHttp = null;
+    page.on("response", (res) => {
+      try {
+        const u = res.url();
+        const st = res.status();
+        if (u.includes("auth.burgerking.com.br") && st >= 400) {
+          ultimoErroHttp = `HTTP ${st} em ${u.split("?")[0]}`;
+        }
+      } catch {
+        // ignora
+      }
+    });
 
     const capturarUrl = (urlStr) => {
       const parsed = extrairCodigoRedirect(urlStr);
@@ -384,11 +412,11 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
     }
 
     await page.waitForSelector('input:not([type="hidden"])', { timeout: 25000 });
-    await sleep(1000);
+    await sleep(1500);
     await preencherInput(page, 'input:not([type="hidden"])', email);
     await sleep(1200);
 
-    const deadlineOtpScreen = Date.now() + 40000;
+    const deadlineOtpScreen = Date.now() + 45000;
     let ultimoCliqueEmail = 0;
     let telaOtpPronta = false;
 
@@ -396,16 +424,26 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
       const estado = await page
         .evaluate(() => {
           const codes = document.querySelectorAll("input.input-code").length;
+          const inp = document.querySelector('input:not([type="hidden"])');
           const btn = [...document.querySelectorAll("button")].find(
             (b) => !b.disabled && /continuar/i.test(b.innerText || "")
           );
-          return { codes, temContinuar: Boolean(btn) };
+          return {
+            codes,
+            temContinuar: Boolean(btn),
+            emailVal: inp ? inp.value : "",
+          };
         })
-        .catch(() => ({ codes: 0, temContinuar: false }));
+        .catch(() => ({ codes: 0, temContinuar: false, emailVal: "" }));
 
       if (estado.codes >= 6) {
         telaOtpPronta = true;
         break;
+      }
+
+      if (estado.emailVal !== email && Date.now() - ultimoCliqueEmail > 3000) {
+        await preencherInput(page, 'input:not([type="hidden"])', email);
+        await sleep(500);
       }
 
       if (estado.temContinuar && Date.now() - ultimoCliqueEmail > 4500) {
@@ -420,7 +458,7 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
         .evaluate(() => (document.body?.innerText || "").trim().slice(0, 300))
         .catch(() => "");
       throw new Error(
-        `Tela de codigo OTP nao apareceu no Chrome.${resumoPagina ? ` Pagina: ${resumoPagina}` : ""}`
+        `Tela de codigo OTP nao apareceu no Chrome.${ultimoErroHttp ? ` (${ultimoErroHttp})` : ""}${resumoPagina ? ` Pagina: ${resumoPagina}` : ""}`
       );
     }
 
