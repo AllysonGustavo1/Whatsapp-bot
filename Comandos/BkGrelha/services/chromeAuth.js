@@ -339,6 +339,9 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
   if (process.platform === "linux") {
     launchArgs.push("--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage");
   }
+  if (process.env.BK_CHROME_PROXY) {
+    launchArgs.push(`--proxy-server=${process.env.BK_CHROME_PROXY}`);
+  }
 
   let browser = null;
   let authCode = null;
@@ -359,15 +362,42 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
     const page = pages[0] || (await browser.newPage());
 
     const ua = await browser.userAgent();
-    if (ua.includes("HeadlessChrome")) {
-      await page.setUserAgent(ua.replace(/HeadlessChrome/g, "Chrome"));
-    }
-    await page.setViewport({ width: 460, height: 820 }).catch(() => {});
-    await page
-      .setExtraHTTPHeaders({
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    const cleanUa = ua.replace(/HeadlessChrome/g, "Chrome");
+    const majorMatch = cleanUa.match(/Chrome\/(\d+)/);
+    const major = majorMatch ? majorMatch[1] : "131";
+    const fullVerMatch = cleanUa.match(/Chrome\/([\d.]+)/);
+    const fullVer = fullVerMatch ? fullVerMatch[1] : `${major}.0.0.0`;
+    const isWin = cleanUa.includes("Windows");
+
+    const cdp = await page.createCDPSession();
+    await cdp.send("Network.enable");
+    await cdp
+      .send("Network.setUserAgentOverride", {
+        userAgent: cleanUa,
+        acceptLanguage: "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        platform: isWin ? "Win32" : "Linux x86_64",
+        userAgentMetadata: {
+          brands: [
+            { brand: "Google Chrome", version: major },
+            { brand: "Chromium", version: major },
+            { brand: "Not_A Brand", version: "24" },
+          ],
+          fullVersionList: [
+            { brand: "Google Chrome", version: fullVer },
+            { brand: "Chromium", version: fullVer },
+            { brand: "Not_A Brand", version: "24.0.0.0" },
+          ],
+          platform: isWin ? "Windows" : "Linux",
+          platformVersion: isWin ? "10.0.0" : "6.5.0",
+          architecture: "x86",
+          model: "",
+          mobile: false,
+        },
       })
-      .catch(() => {});
+      .catch(async () => {
+        await page.setUserAgent(cleanUa);
+      });
+    await page.setViewport({ width: 460, height: 820 }).catch(() => {});
     await page.emulateTimezone("America/Sao_Paulo").catch(() => {});
 
     let ultimoErroHttp = null;
@@ -390,8 +420,6 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
       if (parsed.error && !authError) authError = parsed.error;
     };
 
-    const cdp = await page.createCDPSession();
-    await cdp.send("Network.enable");
     cdp.on("Network.requestWillBeSent", (ev) => {
       capturarUrl(ev?.request?.url || "");
     });
