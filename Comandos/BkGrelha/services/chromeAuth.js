@@ -304,6 +304,26 @@ async function completarCadastroZamp(accessToken, { onLog } = {}) {
   }
 }
 
+async function aguardarCookieAkamai(page, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  let moveu = false;
+  while (Date.now() < deadline) {
+    const cookies = await page.cookies().catch(() => []);
+    const abck = cookies.find((c) => c.name === "_abck")?.value || "";
+    if (abck.includes("~0~")) {
+      return true;
+    }
+    if (!moveu && deadline - Date.now() < timeoutMs - 2500) {
+      moveu = true;
+      await page.mouse
+        .move(140 + Math.random() * 140, 320 + Math.random() * 90, { steps: 10 })
+        .catch(() => {});
+    }
+    await sleep(500);
+  }
+  return false;
+}
+
 async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
   const log = typeof onLog === "function" ? onLog : () => {};
   if (!email) {
@@ -401,12 +421,14 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
     await page.emulateTimezone("America/Sao_Paulo").catch(() => {});
 
     let ultimoErroHttp = null;
+    let qtd403Auth = 0;
     page.on("response", async (res) => {
       try {
         const u = res.url();
         const st = res.status();
         if (u.includes("auth.burgerking.com.br") && st >= 400) {
           ultimoErroHttp = `HTTP ${st} em ${u.split("?")[0]}`;
+          if (st === 403) qtd403Auth += 1;
           const hdrs = res.headers();
           const bodyPreview = await res
             .text()
@@ -461,13 +483,17 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
     await page.mouse.move(220 + Math.random() * 60, 420 + Math.random() * 40, {
       steps: 8,
     }).catch(() => {});
-    await sleep(1200);
+    await aguardarCookieAkamai(page, 10000);
 
     const deadlineOtpScreen = Date.now() + 45000;
     let ultimoCliqueEmail = 0;
     let telaOtpPronta = false;
 
     while (Date.now() < deadlineOtpScreen) {
+      if (qtd403Auth >= 3) {
+        break;
+      }
+
       const estado = await page
         .evaluate(() => {
           const codes = document.querySelectorAll("input.input-code").length;
@@ -493,7 +519,7 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
         await sleep(500);
       }
 
-      if (estado.temContinuar && Date.now() - ultimoCliqueEmail > 4500) {
+      if (estado.temContinuar && Date.now() - ultimoCliqueEmail > 6000) {
         await clicarSubmit(page, "Continuar");
         ultimoCliqueEmail = Date.now();
       }
