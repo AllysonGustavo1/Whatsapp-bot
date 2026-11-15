@@ -15,10 +15,8 @@ const {
   gerarQrCodePngBuffer,
 } = require("./services/bkApi");
 const { criarEmailTemporarioBk } = require("./services/emailCode");
-const {
-  autenticarContaNoEmulador,
-  encerrarNox,
-} = require("./services/adbEmulator");
+const { autenticarContaNoChrome } = require("./services/chromeAuth");
+const { encerrarNox } = require("./services/adbEmulator");
 const {
   CONTAS_TXT_PATH,
   resolverCaminhoContas,
@@ -62,7 +60,7 @@ function buildBkHelpMessage(prefix = "/") {
   return [
     "🍔 *Burger King — Grelha (Shake & Win)*",
     "",
-    `• \`${prefix}bk\` ou \`${prefix}grelha\` (ou \`${prefix}bk girar [qtd]\`) — Cria conta descartável no Mail.tm, autentica no emulador, gira a grelha e envia a imagem do prêmio (com \`JACKPOT!\` se grátis, \`PREMIO: ... | Codigo: ...\` e \`Conta: cpf:senha\`) e o QR Code em seguida`,
+    `• \`${prefix}bk\` ou \`${prefix}grelha\` (ou \`${prefix}bk girar [qtd]\`) — Cria conta descartável no Mail.tm, autentica no Chrome, gira a grelha e envia a imagem do prêmio (com \`JACKPOT!\` se grátis, \`PREMIO: ... | Codigo: ...\` e \`Conta: cpf:senha\`) e o QR Code em seguida`,
     `• \`${prefix}bk criar [qtd]\` — Mesmo fluxo automático (até 10 contas por vez)`,
     `• \`${prefix}bk txt\` (ou \`${prefix}bk ler\`) — Gira as contas salvas em \`${arq}\``,
     `• \`${prefix}bk contas\` — Lista contas cadastradas e status das sessões salvas`,
@@ -177,7 +175,7 @@ async function obterCredenciaisAtivas(conta, { onLog, forcarEmulador = false } =
     }
   }
 
-  // 3) Login via emulador ADB + WebView DevTools + Mail.tm
+  // 3) Login via Chrome (sem flags de automacao) + Mail.tm
   if (!email) {
     throw new Error(
       "Conta informada apenas com access_token expirado (sem refresh_token ou email)."
@@ -185,10 +183,10 @@ async function obterCredenciaisAtivas(conta, { onLog, forcarEmulador = false } =
   }
 
   let cpfAtual = cpf;
-  let sessaoAdb = null;
+  let sessaoChrome = null;
   for (let tentativaCpf = 1; tentativaCpf <= 3; tentativaCpf += 1) {
     try {
-      sessaoAdb = await autenticarContaNoEmulador({
+      sessaoChrome = await autenticarContaNoChrome({
         email,
         senha: conta.senha,
         cpf: cpfAtual,
@@ -207,26 +205,23 @@ async function obterCredenciaisAtivas(conta, { onLog, forcarEmulador = false } =
       conta.cpf = cpfAtual;
     }
   }
-  await sleep(2000);
+  await sleep(1500);
 
-  const payload = decodificarJwt(sessaoAdb.accessToken);
+  const payload = decodificarJwt(sessaoChrome.accessToken);
   const finalCreds = {
-    accessToken: sessaoAdb.accessToken,
-    refreshToken: sessaoAdb.refreshToken,
-    customerId: sessaoAdb.customerId || payload?.sub || customerId,
-    email: sessaoAdb.email || email,
-    cpf: sessaoAdb.cpf || cpfAtual,
+    accessToken: sessaoChrome.accessToken,
+    refreshToken: sessaoChrome.refreshToken,
+    customerId: sessaoChrome.customerId || payload?.sub || customerId,
+    email: sessaoChrome.email || email,
+    cpf: sessaoChrome.cpf || cpfAtual,
   };
-
-  const origemAuth = sessaoAdb.metodoWorker ? "worker-nox" : "adb-emulator";
-  const metodoAuth = sessaoAdb.metodoWorker ? "worker" : "emulador";
 
   salvarSessaoConta(conta.chave, {
     ...finalCreds,
-    origem: origemAuth,
+    origem: "chrome",
   });
 
-  return { ...finalCreds, metodoAuth };
+  return { ...finalCreds, metodoAuth: "chrome" };
 }
 
 async function montarResultadoGiro({
@@ -299,20 +294,14 @@ async function montarResultadoGiro({
 }
 
 async function enviarMidiasResultado(send, giro) {
-  if (!giro || giro.status === "erro") return;
+  if (!giro || giro.status === "erro" || giro.status === "ja_girou") return;
 
   const identificadorConta = giro.cpf || giro.email || null;
   const linhaConta = identificadorConta
     ? `Conta: ${identificadorConta}${giro.senha ? `:${giro.senha}` : ""}`
     : null;
 
-  const avisoRepetida =
-    giro.status === "ja_girou"
-      ? "⚠️ *REPETIDA* — essa conta já tinha girado antes, esse prêmio já foi enviado"
-      : null;
-
   const captionPremio = [
-    avisoRepetida,
     giro.jackpot ? "JACKPOT!" : null,
     giro.descricaoPremio,
     linhaConta,
@@ -593,7 +582,11 @@ async function executarGiroGrelha({
       const res = await processarContaGrelha(conta, { onLog: logFn });
       if (res.metodoAuth === "emulador") usouEmulador = true;
       resultados.push(res);
-      if (res.status !== "erro" && (res.imagemPremioBuffer || res.qrCodeBuffer)) {
+      if (
+        res.status !== "erro" &&
+        res.status !== "ja_girou" &&
+        (res.imagemPremioBuffer || res.qrCodeBuffer)
+      ) {
         await enviarMidiasResultado(send, res);
       }
     } catch (err) {
@@ -830,7 +823,6 @@ async function executarCriarContasBk({
   );
 
   const resultados = [];
-  const chavesFallbackUsadas = new Set();
 
   for (let i = 0; i < qtd; i += 1) {
     let email = null;
@@ -878,25 +870,9 @@ async function executarCriarContasBk({
         });
       }
     } catch (err) {
-      if (ehErroIndisponibilidadeAuth(err)) {
-        logFn(`Autenticacao remota indisponivel (${err.message}); acionando pool salvo...`);
-        const fallback = await girarContaDisponivelDoPool({
-          arquivoTxt,
-          girar,
-          log: logFn,
-          chavesJaUsadas: chavesFallbackUsadas,
-        });
-        if (fallback) {
-          resultados.push(fallback);
-          if (girar) {
-            await enviarMidiasResultado(send, fallback);
-          }
-          continue;
-        }
-      }
-
+      logFn(`Falha ao criar/girar conta: ${err?.message || "Erro desconhecido"}`);
       resultados.push({
-        conta: `Nova conta #${i + 1}`,
+        conta: email || `Nova conta #${i + 1}`,
         status: "erro",
         metodoAuth: null,
         resumo: err?.message || "Erro ao criar/autenticar conta",
@@ -914,7 +890,11 @@ async function executarCriarContasBk({
     resultados,
     resolverCaminhoContas(arquivoTxt)
   );
-  if (qtd > 1 || !girar || resultados.some((r) => r.status === "erro")) {
+  if (
+    qtd > 1 ||
+    !girar ||
+    resultados.some((r) => r.status === "erro" || r.status === "ja_girou")
+  ) {
     await send(relatorio);
   }
   return { resultados, relatorio };
