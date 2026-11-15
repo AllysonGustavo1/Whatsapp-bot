@@ -401,12 +401,22 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
     await page.emulateTimezone("America/Sao_Paulo").catch(() => {});
 
     let ultimoErroHttp = null;
-    page.on("response", (res) => {
+    page.on("response", async (res) => {
       try {
         const u = res.url();
         const st = res.status();
         if (u.includes("auth.burgerking.com.br") && st >= 400) {
           ultimoErroHttp = `HTTP ${st} em ${u.split("?")[0]}`;
+          const hdrs = res.headers();
+          const bodyPreview = await res
+            .text()
+            .then((t) => t.replace(/\s+/g, " ").slice(0, 400))
+            .catch(() => "");
+          const cookies = await page.cookies().catch(() => []);
+          const abck = cookies.find((c) => c.name === "_abck")?.value || "";
+          log(
+            `[DEBUG-HTTP] ${st} ${u.split("?")[0]} | server=${hdrs.server || "?"} | _abck=${abck ? abck.slice(0, 45) + "..." : "ausente"} | body=${bodyPreview}`
+          );
         }
       } catch {
         // ignora
@@ -434,14 +444,23 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
+    await page
+      .waitForNetworkIdle({ idleTime: 800, timeout: 10000 })
+      .catch(() => {});
 
     if (authError) {
       throw new Error(`Keycloak rejeitou autenticacao: ${authError}`);
     }
 
     await page.waitForSelector('input:not([type="hidden"])', { timeout: 25000 });
-    await sleep(1500);
+    await page.mouse.move(180 + Math.random() * 80, 260 + Math.random() * 60, {
+      steps: 8,
+    }).catch(() => {});
+    await sleep(1200);
     await preencherInput(page, 'input:not([type="hidden"])', email);
+    await page.mouse.move(220 + Math.random() * 60, 420 + Math.random() * 40, {
+      steps: 8,
+    }).catch(() => {});
     await sleep(1200);
 
     const deadlineOtpScreen = Date.now() + 45000;
