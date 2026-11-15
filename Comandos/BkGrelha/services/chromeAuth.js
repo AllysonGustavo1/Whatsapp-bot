@@ -95,7 +95,7 @@ function gerarCelularAleatorio() {
 }
 
 async function preencherInput(page, selector, valor) {
-  await page.waitForSelector(selector, { visible: true, timeout: 20000 });
+  await page.waitForSelector(selector, { timeout: 20000 });
   const el = await page.$(selector);
   if (el) {
     await el.focus().catch(() => {});
@@ -319,16 +319,7 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
 
   const executablePath = encontrarChromeExecutable();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "bk-chrome-"));
-  const isLinuxSemDisplay =
-    process.platform === "linux" && !process.env.DISPLAY;
-  const headless =
-    process.env.BK_CHROME_HEADLESS === "1"
-      ? "new"
-      : process.env.BK_CHROME_HEADLESS === "0"
-        ? false
-        : isLinuxSemDisplay
-          ? "new"
-          : false;
+  const headless = process.env.BK_CHROME_HEADLESS === "0" ? false : true;
 
   const launchArgs = [
     "--disable-blink-features=AutomationControlled",
@@ -358,6 +349,11 @@ async function autenticarContaNoChrome({ email, senha, cpf, onLog } = {}) {
 
     const pages = await browser.pages();
     const page = pages[0] || (await browser.newPage());
+
+    const ua = await browser.userAgent();
+    if (ua.includes("HeadlessChrome")) {
+      await page.setUserAgent(ua.replace(/HeadlessChrome/g, "Chrome"));
+    }
 
     const capturarUrl = (urlStr) => {
       const parsed = extrairCodigoRedirect(urlStr);
