@@ -306,7 +306,13 @@ async function enviarMidiasResultado(send, giro) {
     ? `Conta: ${identificadorConta}${giro.senha ? `:${giro.senha}` : ""}`
     : null;
 
+  const avisoRepetida =
+    giro.status === "ja_girou"
+      ? "⚠️ *REPETIDA* — essa conta já tinha girado antes, esse prêmio já foi enviado"
+      : null;
+
   const captionPremio = [
+    avisoRepetida,
     giro.jackpot ? "JACKPOT!" : null,
     giro.descricaoPremio,
     linhaConta,
