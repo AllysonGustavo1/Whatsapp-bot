@@ -419,12 +419,36 @@ async function handleMessage(sock, message) {
     const nowSec = Math.floor(Date.now() / 1000);
     if (msgTime && nowSec - msgTime > 60) return;
 
+    // Desembrulha mensagens temporárias / visualização única / deviceSentMessage
+    const innerMessage =
+      message.message?.ephemeralMessage?.message ||
+      message.message?.viewOnceMessage?.message ||
+      message.message?.viewOnceMessageV2?.message ||
+      message.message?.deviceSentMessage?.message ||
+      message.message;
+
     // Extrai o texto da mensagem (suporta texto simples, extendedText e listResponseMessage)
     const content =
-      message.message?.conversation ||
-      message.message?.extendedTextMessage?.text ||
-      message.message?.listResponseMessage?.title ||
+      innerMessage?.conversation ||
+      innerMessage?.extendedTextMessage?.text ||
+      innerMessage?.listResponseMessage?.title ||
       "";
+
+    if (!content && message.key?.remoteJid) {
+      const msgKeys = Object.keys(message.message || {});
+      if (
+        msgKeys.some(
+          (k) =>
+            k !== "senderKeyDistributionMessage" &&
+            k !== "protocolMessage" &&
+            k !== "messageContextInfo"
+        )
+      ) {
+        console.log(
+          `[MSG-SEM-TEXTO] ${message.key.remoteJid} | keys=${msgKeys.join(",")}`
+        );
+      }
+    }
 
     // Se a mensagem partiu da própria conta (fromMe):
     // Só processa se for um comando (iniciado com PREFIX).
