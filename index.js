@@ -1048,8 +1048,8 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     ...(version ? { version } : {}),
     auth: state,
-    // Logger silencioso — mude para 'info' ou 'debug' se quiser mais detalhes
-    logger: pino({ level: "silent" }),
+    // Logger em warn para registrar falhas de descriptografia/reconexão sem poluir
+    logger: pino({ level: "warn" }),
     printQRInTerminal: false, // exibimos manualmente via qrcode-terminal
     browser: [nomeConexao, "Chrome", "1.0.0"],
     syncFullHistory: false,
