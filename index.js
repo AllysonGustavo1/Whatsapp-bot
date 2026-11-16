@@ -52,9 +52,8 @@ const {
 const {
   buildBkHelpMessage,
   parseBkCommand,
-  executarGiroGrelha,
-  listarContasStatus,
   executarAdicionarContas,
+  executarGerarCuponsBk,
   executarCriarContasBk,
 } = require("./Comandos/BkGrelha");
 const qrcode = require("qrcode-terminal");
@@ -205,6 +204,49 @@ function isCommandAuthorized(config, commandName, senderIdentifiers) {
         (cleanSender === cleanItem ||
           cleanSender.endsWith(cleanItem) ||
           cleanItem.endsWith(cleanSender))
+      );
+    });
+  });
+}
+
+function isBkAdminAuthorized(config, senderIdentifiers, from, message) {
+  if (message?.key?.fromMe) return true;
+
+  const envAdmins = String(process.env.BK_ADMIN_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const cfgAdmins = Array.isArray(config?.bk?.adminAutorizados)
+    ? config.bk.adminAutorizados
+    : [];
+  const autorizados = [
+    ...new Set([
+      "558487672874",
+      "558487672874-1561671344@g.us",
+      ...cfgAdmins,
+      ...envAdmins,
+    ]),
+  ];
+
+  const candidatos = [
+    ...(Array.isArray(senderIdentifiers) ? senderIdentifiers : [senderIdentifiers]),
+    from,
+  ]
+    .filter(Boolean)
+    .map((v) => String(v));
+
+  return candidatos.some((cand) => {
+    const cleanCand = cand.split("@")[0].replace(/\D/g, "");
+    return autorizados.some((item) => {
+      const strItem = String(item);
+      if (cand === strItem) return true;
+      const cleanItem = strItem.split("@")[0].replace(/\D/g, "");
+      return (
+        cleanCand &&
+        cleanItem &&
+        (cleanCand === cleanItem ||
+          cleanCand.endsWith(cleanItem) ||
+          cleanItem.endsWith(cleanCand))
       );
     });
   });
@@ -832,7 +874,7 @@ async function handleMessage(sock, message) {
       return;
     }
 
-    // /bk | /grelha [gerar [qtd] | help]
+    // /bk | /grelha [gerar [qtd] | criar [qtd] | help]
     if (bkData) {
       if (!(await checkCommandAccess("bk"))) return;
 
@@ -841,13 +883,24 @@ async function handleMessage(sock, message) {
         return;
       }
 
+      if (bkData.action === "add" || bkData.action === "criar") {
+        if (!isBkAdminAuthorized(commandsConfig, senderIdentifiers, from, message)) {
+          await sendTextWithLog(
+            sock,
+            from,
+            `⛔ Você não tem permissão para usar o comando ${PREFIX}bk ${bkData.action}.`
+          );
+          return;
+        }
+      }
+
       if (bkData.action === "add") {
         const msg = await executarAdicionarContas({ argTexto: bkData.argTexto });
         await sendTextWithLog(sock, from, msg);
         return;
       }
 
-      if (bkData.action === "girar" || bkData.action === "criar") {
+      if (bkData.action === "gerar" || bkData.action === "criar") {
         if (runningByChat.has(from)) {
           await sendTextWithLog(
             sock,
@@ -867,11 +920,18 @@ async function handleMessage(sock, message) {
 
         runningByChat.add(from);
         try {
-          await executarCriarContasBk({
-            quantidade: bkData.quantidade || 1,
-            girar: true,
-            onOutput: enviarSaidaBk,
-          });
+          if (bkData.action === "criar") {
+            await executarCriarContasBk({
+              quantidade: bkData.quantidade || 1,
+              girar: true,
+              onOutput: enviarSaidaBk,
+            });
+          } else {
+            await executarGerarCuponsBk({
+              quantidade: bkData.quantidade || 1,
+              onOutput: enviarSaidaBk,
+            });
+          }
         } catch (error) {
           console.error("Erro no /bk:", error);
           await sendTextWithLog(

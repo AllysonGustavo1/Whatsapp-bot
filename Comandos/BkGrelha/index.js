@@ -57,9 +57,9 @@ function extrairQuantidade(token) {
 
 function buildBkHelpMessage(prefix = "/") {
   return [
-    "🍔 *Burger King — Grelha (Shake & Win)*",
+    "🍔 *Burger King — Grelha*",
     "",
-    `• \`${prefix}bk\` ou \`${prefix}grelha\` (ou \`${prefix}bk gerar [qtd]\`) — Gera cupom(ns) na Grelha BK e envia a imagem do prêmio com o QR Code (até 10 por vez)`,
+    `• \`${prefix}bk\` ou \`${prefix}grelha\` (ou \`${prefix}bk gerar [qtd]\`) — Gera cupom na Grelha BK e envia a imagem do prêmio com o QR Code`,
     `• \`${prefix}bk help\` — Mostra esta ajuda`,
   ].join("\n");
 }
@@ -77,7 +77,7 @@ function parseBkCommand(text, prefix = "/") {
   const resto = (match[2] || "").trim();
 
   if (!resto) {
-    return { action: "criar", comandoUsado, quantidade: 1 };
+    return { action: "gerar", comandoUsado, quantidade: 1 };
   }
 
   const primeiraLinha = resto.split(/\r?\n/)[0].trim();
@@ -88,22 +88,14 @@ function parseBkCommand(text, prefix = "/") {
   if (["help", "ajuda", "?"].includes(sub)) {
     return { action: "help", comandoUsado };
   }
-  if (
-    [
-      "gerar",
-      "cupom",
-      "cupons",
-      "girar",
-      "spin",
-      "rodar",
-      "run",
-      "grelhar",
-      "criar",
-      "nova",
-      "novas",
-      "create",
-    ].includes(sub)
-  ) {
+  if (["gerar", "girar", "spin", "rodar", "run", "grelhar"].includes(sub)) {
+    return {
+      action: "gerar",
+      comandoUsado,
+      quantidade: extrairQuantidade(tokens[1]),
+    };
+  }
+  if (["criar", "nova", "novas", "create"].includes(sub)) {
     return {
       action: "criar",
       comandoUsado,
@@ -117,7 +109,10 @@ function parseBkCommand(text, prefix = "/") {
   return { action: "unknown", comandoUsado, sub };
 }
 
-async function obterCredenciaisAtivas(conta, { onLog, forcarEmulador = false } = {}) {
+async function obterCredenciaisAtivas(
+  conta,
+  { onLog, forcarEmulador = false, apenasTokenCache = false } = {}
+) {
   const log = typeof onLog === "function" ? onLog : () => {};
   const sessao = obterSessaoConta(conta) || {};
 
@@ -175,7 +170,10 @@ async function obterCredenciaisAtivas(conta, { onLog, forcarEmulador = false } =
     }
   }
 
-  // 3) Login via Chrome (sem flags de automacao) + Mail.tm
+  // 3) Login via Chrome (sem flags de automacao)
+  if (apenasTokenCache) {
+    throw new Error("Sessao da conta do pool expirada ou indisponivel.");
+  }
   if (!email) {
     throw new Error(
       "Conta informada apenas com access_token expirado (sem refresh_token ou email)."
@@ -293,13 +291,14 @@ async function montarResultadoGiro({
   };
 }
 
-async function enviarMidiasResultado(send, giro) {
+async function enviarMidiasResultado(send, giro, { incluirConta = false } = {}) {
   if (!giro || giro.status === "erro" || giro.status === "ja_girou") return;
 
   const identificadorConta = giro.cpf || giro.email || null;
-  const linhaConta = identificadorConta
-    ? `Conta: ${identificadorConta}${giro.senha ? `:${giro.senha}` : ""}`
-    : null;
+  const linhaConta =
+    incluirConta && identificadorConta
+      ? `Conta: ${identificadorConta}${giro.senha ? `:${giro.senha}` : ""}`
+      : null;
 
   const captionPremio = [
     giro.jackpot ? "JACKPOT!" : null,
@@ -331,11 +330,17 @@ async function enviarMidiasResultado(send, giro) {
   }
 }
 
-async function processarContaGrelha(conta, { onLog } = {}) {
+async function processarContaGrelha(
+  conta,
+  { onLog, apenasTokenCache = false } = {}
+) {
   const log = typeof onLog === "function" ? onLog : () => {};
   const label = nomeExibicaoConta(conta, obterSessaoConta(conta));
 
-  let creds = await obterCredenciaisAtivas(conta, { onLog: log });
+  let creds = await obterCredenciaisAtivas(conta, {
+    onLog: log,
+    apenasTokenCache,
+  });
   await consultarHomeGrelha(creds.accessToken, creds.customerId).catch(() => null);
   let getRes = await abrirGrelha(creds.accessToken, creds.customerId);
 
@@ -517,7 +522,11 @@ async function processarContaGrelha(conta, { onLog } = {}) {
   });
 }
 
-function formatarRelatorioGiro(resultados) {
+function formatarRelatorioGiro(
+  resultados,
+  caminhoTxt,
+  { ocultarDetalhesInternos = false } = {}
+) {
   let ok = 0;
   let jaGirou = 0;
   let erros = 0;
@@ -533,11 +542,26 @@ function formatarRelatorioGiro(resultados) {
     } else {
       erros += 1;
     }
-    return `${i + 1}. ${icone} *${r.conta}*\n   ${r.resumo}`;
+    const tituloItem = ocultarDetalhesInternos ? `Cupom #${i + 1}` : r.conta;
+    const authTag =
+      !ocultarDetalhesInternos && r.metodoAuth ? ` [${r.metodoAuth}]` : "";
+    return `${i + 1}. ${icone} *${tituloItem}*${authTag}\n   ${r.resumo}`;
   });
 
+  if (ocultarDetalhesInternos) {
+    return [
+      `🔥 *Resultado Grelha BK* (${resultados.length} cupom(ns))`,
+      "",
+      ...linhas,
+      "",
+      `📊 Resumo: *${ok}* OK | *${erros}* erro(s)`,
+    ].join("\n");
+  }
+
+  const relArq = path.relative(process.cwd(), caminhoTxt);
   return [
-    `🍔 *Resultado Grelha BK* (${resultados.length} cupom(ns))`,
+    `🔥 *Resultado Grelha BK* (${resultados.length} conta(s))`,
+    `📄 Arquivo: \`${relArq}\``,
     "",
     ...linhas,
     "",
@@ -758,7 +782,10 @@ async function girarContaDisponivelDoPool({
   for (const { conta } of candidatos) {
     try {
       if (!girar) {
-        const creds = await obterCredenciaisAtivas(conta, { onLog: log });
+        const creds = await obterCredenciaisAtivas(conta, {
+          onLog: log,
+          apenasTokenCache: true,
+        });
         chavesJaUsadas.add(conta.chave);
         return {
           conta: creds.email || conta.chave,
@@ -770,7 +797,10 @@ async function girarContaDisponivelDoPool({
         };
       }
 
-      const res = await processarContaGrelha(conta, { onLog: log });
+      const res = await processarContaGrelha(conta, {
+        onLog: log,
+        apenasTokenCache: true,
+      });
       chavesJaUsadas.add(conta.chave);
       if (res.status === "sucesso") {
         return {
@@ -787,6 +817,99 @@ async function girarContaDisponivelDoPool({
   return null;
 }
 
+async function executarGerarCuponsBk({
+  quantidade = 1,
+  arquivoTxt = null,
+  onOutput,
+  fecharEmuladorNoFinal = false,
+} = {}) {
+  const send = typeof onOutput === "function" ? onOutput : async () => {};
+  const qtd = Math.max(1, Math.min(10, Number(quantidade) || 1));
+
+  await send(`🍔 Gerando *${qtd}* cupom(ns) da Grelha BK...`);
+
+  const resultados = [];
+  const chavesJaUsadas = new Set();
+
+  for (let i = 0; i < qtd; i += 1) {
+    const logFn = (msg) => console.log(`[BK-Gerar][#${i + 1}] ${msg}`);
+    let giro = null;
+
+    try {
+      giro = await girarContaDisponivelDoPool({
+        arquivoTxt,
+        girar: true,
+        log: logFn,
+        chavesJaUsadas,
+      });
+
+      if (!giro) {
+        let senha = "BkGrelha2024@";
+        const cpf = gerarCPF();
+        const criado = await criarEmailTemporarioBk(senha);
+        const email = criado.email;
+        senha = criado.senha || criado.senhaMailbox || senha;
+
+        const conta = {
+          tipo: "email",
+          chave: email.toLowerCase(),
+          email: email.toLowerCase(),
+          senha,
+          cpf,
+        };
+
+        giro = await processarContaGrelha(conta, {
+          onLog: (msg) => console.log(`[BK-Gerar][${email}] ${msg}`),
+        });
+        chavesJaUsadas.add(conta.chave);
+
+        const sessaoSalva = obterSessaoConta(conta);
+        if (sessaoSalva?.refreshToken || sessaoSalva?.accessToken) {
+          adicionarContasTxt(
+            [`${email}:${senha}:${giro.cpf || cpf}`],
+            arquivoTxt
+          );
+        }
+      }
+
+      if (giro.status === "sucesso") {
+        resultados.push(giro);
+        await enviarMidiasResultado(send, giro, { incluirConta: false });
+      } else {
+        resultados.push({
+          ...giro,
+          status: "erro",
+          resumo: giro.resumo || "Nao foi possivel gerar o cupom nesta tentativa.",
+        });
+      }
+    } catch (err) {
+      logFn(`Falha ao gerar cupom: ${err?.message || "Erro desconhecido"}`);
+      resultados.push({
+        conta: `Cupom #${i + 1}`,
+        status: "erro",
+        metodoAuth: null,
+        resumo: err?.message || "Erro ao gerar cupom",
+        premio: null,
+        cupom: null,
+      });
+    }
+  }
+
+  if (fecharEmuladorNoFinal) {
+    await encerrarNox().catch(() => {});
+  }
+
+  const relatorio = formatarRelatorioGiro(
+    resultados,
+    resolverCaminhoContas(arquivoTxt),
+    { ocultarDetalhesInternos: true }
+  );
+  if (qtd > 1 || resultados.some((r) => r.status === "erro")) {
+    await send(relatorio);
+  }
+  return { resultados, relatorio };
+}
+
 async function executarCriarContasBk({
   quantidade = 1,
   girar = true,
@@ -797,32 +920,19 @@ async function executarCriarContasBk({
   const send = typeof onOutput === "function" ? onOutput : async () => {};
   const qtd = Math.max(1, Math.min(10, Number(quantidade) || 1));
 
-  await send(`🍔 Gerando cupom na Grelha BK (*${qtd}*)...`);
+  await send(
+    `🧪 Criando conta e girando a Grelha BK (*${qtd}*)...`
+  );
 
   const resultados = [];
-  const chavesJaUsadas = new Set();
 
   for (let i = 0; i < qtd; i += 1) {
     let email = null;
     let senha = "BkGrelha2024@";
     const cpf = gerarCPF();
-    const logFn = (msg) => console.log(`[BK-Gerar][${email || `#${i + 1}`}] ${msg}`);
+    const logFn = (msg) => console.log(`[BK-Criar][${email || `#${i + 1}`}] ${msg}`);
 
     try {
-      if (girar) {
-        const giroPool = await girarContaDisponivelDoPool({
-          arquivoTxt,
-          girar: true,
-          log: logFn,
-          chavesJaUsadas,
-        });
-        if (giroPool) {
-          resultados.push(giroPool);
-          await enviarMidiasResultado(send, giroPool);
-          continue;
-        }
-      }
-
       const criado = await criarEmailTemporarioBk(senha);
       email = criado.email;
       senha = criado.senha || criado.senhaMailbox || senha;
@@ -834,7 +944,6 @@ async function executarCriarContasBk({
         senha,
         cpf,
       };
-      chavesJaUsadas.add(conta.chave);
 
       if (girar) {
         const giro = await processarContaGrelha(conta, { onLog: logFn });
@@ -846,7 +955,7 @@ async function executarCriarContasBk({
           );
         }
         resultados.push(giro);
-        await enviarMidiasResultado(send, giro);
+        await enviarMidiasResultado(send, giro, { incluirConta: true });
       } else {
         const creds = await obterCredenciaisAtivas(conta, { onLog: logFn });
         adicionarContasTxt(
@@ -863,12 +972,12 @@ async function executarCriarContasBk({
         });
       }
     } catch (err) {
-      logFn(`Falha ao gerar cupom: ${err?.message || "Erro desconhecido"}`);
+      logFn(`Falha ao criar/girar conta: ${err?.message || "Erro desconhecido"}`);
       resultados.push({
-        conta: email || `Cupom #${i + 1}`,
+        conta: email || `Nova conta #${i + 1}`,
         status: "erro",
         metodoAuth: null,
-        resumo: err?.message || "Erro ao gerar cupom",
+        resumo: err?.message || "Erro ao criar/autenticar conta",
         premio: null,
         cupom: null,
       });
@@ -899,6 +1008,7 @@ module.exports = {
   executarGiroGrelha,
   listarContasStatus,
   executarAdicionarContas,
+  executarGerarCuponsBk,
   executarCriarContasBk,
   processarContaGrelha,
   montarResultadoGiro,
