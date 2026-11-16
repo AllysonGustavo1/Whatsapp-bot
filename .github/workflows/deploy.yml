@@ -1,0 +1,45 @@
+name: Deploy VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Atualizar bot na VPS via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            export PATH="$HOME/.nvm/versions/node/$(ls -1 $HOME/.nvm/versions/node 2>/dev/null | tail -n 1)/bin:$PATH" 2>/dev/null || true
+
+            APP_DIR="${{ secrets.VPS_APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then
+              APP_DIR=$(pm2 jlist 2>/dev/null | node -e "const fs=require('fs');const l=JSON.parse(fs.readFileSync(0,'utf8')||'[]');const p=l.find(x=>x.name==='whatsappBotSunga'||x.pm_id===3);console.log(p&&p.pm2_env?p.pm2_env.pm_cwd:'')" 2>/dev/null || true)
+            fi
+            if [ -z "$APP_DIR" ]; then
+              APP_DIR="$HOME/Whatsapp-bot"
+            fi
+
+            echo "Diretorio do projeto: $APP_DIR"
+            cd "$APP_DIR"
+
+            BEFORE_PKG=$(git rev-parse HEAD:package.json 2>/dev/null || true)
+            git pull --ff-only origin main
+            AFTER_PKG=$(git rev-parse HEAD:package.json 2>/dev/null || true)
+
+            if [ "$BEFORE_PKG" != "$AFTER_PKG" ]; then
+              echo "package.json mudou, instalando dependencias..."
+              npm install --omit=dev
+            fi
+
+            pm2 restart whatsappBotSunga || pm2 restart 3
+            pm2 status whatsappBotSunga || pm2 status 3
