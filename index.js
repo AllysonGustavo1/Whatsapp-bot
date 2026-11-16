@@ -878,13 +878,24 @@ async function handleMessage(sock, message) {
     if (bkData) {
       if (!(await checkCommandAccess("bk"))) return;
 
+      const isBkAdmin = isBkAdminAuthorized(
+        commandsConfig,
+        senderIdentifiers,
+        from,
+        message
+      );
+
       if (bkData.action === "help") {
-        await sendTextWithLog(sock, from, buildBkHelpMessage(PREFIX));
+        await sendTextWithLog(
+          sock,
+          from,
+          buildBkHelpMessage(PREFIX, { isAdmin: isBkAdmin })
+        );
         return;
       }
 
       if (bkData.action === "add" || bkData.action === "criar") {
-        if (!isBkAdminAuthorized(commandsConfig, senderIdentifiers, from, message)) {
+        if (!isBkAdmin) {
           await sendTextWithLog(
             sock,
             from,
@@ -948,7 +959,8 @@ async function handleMessage(sock, message) {
       await sendTextWithLog(
         sock,
         from,
-        "⚠️ Subcomando BK não reconhecido.\n\n" + buildBkHelpMessage(PREFIX)
+        "⚠️ Subcomando BK não reconhecido.\n\n" +
+          buildBkHelpMessage(PREFIX, { isAdmin: isBkAdmin })
       );
       return;
     }

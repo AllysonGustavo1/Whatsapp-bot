@@ -55,13 +55,22 @@ function extrairQuantidade(token) {
   return Number.isFinite(qtdRaw) ? Math.max(1, Math.min(10, qtdRaw)) : 1;
 }
 
-function buildBkHelpMessage(prefix = "/") {
-  return [
+function buildBkHelpMessage(prefix = "/", { isAdmin = false } = {}) {
+  const linhas = [
     "🍔 *Burger King — Grelha*",
     "",
     `• \`${prefix}bk\` ou \`${prefix}grelha\` (ou \`${prefix}bk gerar [qtd]\`) — Gera cupom na Grelha BK e envia a imagem do prêmio com o QR Code`,
     `• \`${prefix}bk help\` — Mostra esta ajuda`,
-  ].join("\n");
+  ];
+
+  if (isAdmin) {
+    linhas.push(
+      `• \`${prefix}bk criar [qtd]\` — *(Admin)* Cria nova conta no Chrome, gira a grelha e envia os dados`,
+      `• \`${prefix}bk add <email:senha ou token>\` — *(Admin)* Adiciona conta(s) ao pool interno`
+    );
+  }
+
+  return linhas.join("\n");
 }
 
 function parseBkCommand(text, prefix = "/") {
@@ -774,13 +783,20 @@ async function girarContaDisponivelDoPool({
   log = () => {},
   chavesJaUsadas = new Set(),
 } = {}) {
-  const candidatos = coletarCandidatosPool(arquivoTxt).filter(
+  const todos = coletarCandidatosPool(arquivoTxt);
+  const candidatos = todos.filter(
     (item) => !item.jaGirouHoje && !chavesJaUsadas.has(item.conta.chave)
+  );
+  log(
+    `Pool interno: ${todos.length} conta(s) salva(s) | ${candidatos.length} disponivel(is) para girar hoje.`
   );
   if (candidatos.length === 0) return null;
 
-  for (const { conta } of candidatos) {
+  for (const { conta, sessao } of candidatos) {
     try {
+      log(
+        `Tentando conta existente do pool: ${conta.email || conta.chave} (ultimo giro: ${sessao?.ultimoGiroEm || "nunca"})...`
+      );
       if (!girar) {
         const creds = await obterCredenciaisAtivas(conta, {
           onLog: log,
@@ -803,11 +819,17 @@ async function girarContaDisponivelDoPool({
       });
       chavesJaUsadas.add(conta.chave);
       if (res.status === "sucesso") {
+        log(
+          `[USADA-EXISTENTE] Conta ${res.email || conta.chave} (CPF: ${res.cpf || "?"}) girada com sucesso | metodo=${res.metodoAuth || "refresh_token"}+pool | premio="${res.premio || "?"}" | cupom=${res.cupom || "sem-cupom"}`
+        );
         return {
           ...res,
           metodoAuth: `${res.metodoAuth || "refresh_token"}+pool`,
         };
       }
+      log(
+        `Conta do pool (${conta.email || conta.chave}) retornou status=${res.status} (${res.resumo}), tentando proxima...`
+      );
     } catch (errPool) {
       chavesJaUsadas.add(conta.chave);
       log(`Conta do pool (${conta.chave}) indisponivel: ${errPool.message}`);
@@ -850,6 +872,10 @@ async function executarGerarCuponsBk({
         const email = criado.email;
         senha = criado.senha || criado.senhaMailbox || senha;
 
+        logFn(
+          `[CRIANDO-NOVA] Nenhuma conta disponivel no pool; criando nova conta ${email} (CPF: ${cpf})...`
+        );
+
         const conta = {
           tipo: "email",
           chave: email.toLowerCase(),
@@ -868,6 +894,16 @@ async function executarGerarCuponsBk({
           adicionarContasTxt(
             [`${email}:${senha}:${giro.cpf || cpf}`],
             arquivoTxt
+          );
+        }
+
+        if (giro.status === "sucesso") {
+          logFn(
+            `[NOVA-CRIADA] Conta ${email} (CPF: ${giro.cpf || cpf}) criada e girada | metodo=${giro.metodoAuth || "chrome"} | premio="${giro.premio || "?"}" | cupom=${giro.cupom || "sem-cupom"}`
+          );
+        } else {
+          logFn(
+            `[NOVA-FALHOU] Conta ${email} terminou com status=${giro.status}: ${giro.resumo}`
           );
         }
       }
