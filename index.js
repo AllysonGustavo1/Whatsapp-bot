@@ -1154,6 +1154,14 @@ async function connectToWhatsApp() {
   // Cada mensagem roda em paralelo: um comando demorado (puppeteer etc.)
   // não trava mais a fila de todos os outros comandos.
   sock.ev.on("messages.upsert", ({ messages, type }) => {
+    for (const msg of messages || []) {
+      const jid = msg.key?.remoteJid || "?";
+      if (!isJidBroadcast(jid)) {
+        console.log(
+          `[UPSERT] type=${type} jid=${jid} fromMe=${Boolean(msg.key?.fromMe)} hasMsg=${Boolean(msg.message)} ts=${msg.messageTimestamp || 0}`
+        );
+      }
+    }
     if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
       handleMessage(sock, msg).catch((error) =>
