@@ -934,7 +934,7 @@ async function handleMessage(sock, message) {
           if (bkData.action === "criar") {
             await executarCriarContasBk({
               quantidade: bkData.quantidade || 1,
-              girar: true,
+              girar: false,
               onOutput: enviarSaidaBk,
             });
           } else {

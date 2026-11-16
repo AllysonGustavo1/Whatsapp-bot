@@ -65,7 +65,7 @@ function buildBkHelpMessage(prefix = "/", { isAdmin = false } = {}) {
 
   if (isAdmin) {
     linhas.push(
-      `• \`${prefix}bk criar [qtd]\` — *(Admin)* Cria nova conta no Chrome, gira a grelha e envia os dados`,
+      `• \`${prefix}bk criar [qtd]\` — *(Admin)* Cria nova(s) conta(s) no pool interno (sem girar)`,
       `• \`${prefix}bk add <email:senha ou token>\` — *(Admin)* Adiciona conta(s) ao pool interno`
     );
   }
@@ -957,7 +957,9 @@ async function executarCriarContasBk({
   const qtd = Math.max(1, Math.min(10, Number(quantidade) || 1));
 
   await send(
-    `🧪 Criando conta e girando a Grelha BK (*${qtd}*)...`
+    girar
+      ? `🧪 Criando conta e girando a Grelha BK (*${qtd}*)...`
+      : `🧪 Criando *${qtd}* conta(s) BK no pool interno (sem girar)...`
   );
 
   const resultados = [];
@@ -997,6 +999,9 @@ async function executarCriarContasBk({
         adicionarContasTxt(
           [`${creds.email || email}:${senha}:${creds.cpf || cpf}`],
           arquivoTxt
+        );
+        logFn(
+          `[CRIADA-SEM-GIRAR] Conta ${creds.email || email} (CPF: ${creds.cpf || cpf}, ID: ${creds.customerId}) salva no pool.`
         );
         resultados.push({
           conta: creds.email || email,
