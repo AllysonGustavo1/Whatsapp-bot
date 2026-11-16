@@ -56,15 +56,10 @@ function extrairQuantidade(token) {
 }
 
 function buildBkHelpMessage(prefix = "/") {
-  const arq = path.relative(process.cwd(), CONTAS_TXT_PATH);
   return [
     "🍔 *Burger King — Grelha (Shake & Win)*",
     "",
-    `• \`${prefix}bk\` ou \`${prefix}grelha\` (ou \`${prefix}bk girar [qtd]\`) — Cria conta descartável no Mail.tm, autentica no Chrome, gira a grelha e envia a imagem do prêmio (com \`JACKPOT!\` se grátis, \`PREMIO: ... | Codigo: ...\` e \`Conta: cpf:senha\`) e o QR Code em seguida`,
-    `• \`${prefix}bk criar [qtd]\` — Mesmo fluxo automático (até 10 contas por vez)`,
-    `• \`${prefix}bk txt\` (ou \`${prefix}bk ler\`) — Gira as contas salvas em \`${arq}\``,
-    `• \`${prefix}bk contas\` — Lista contas cadastradas e status das sessões salvas`,
-    `• \`${prefix}bk add <email:senha ou token>\` — Adiciona uma ou mais linhas no \`contas.txt\``,
+    `• \`${prefix}bk\` ou \`${prefix}grelha\` (ou \`${prefix}bk gerar [qtd]\`) — Gera cupom(ns) na Grelha BK e envia a imagem do prêmio com o QR Code (até 10 por vez)`,
     `• \`${prefix}bk help\` — Mostra esta ajuda`,
   ].join("\n");
 }
@@ -94,21 +89,26 @@ function parseBkCommand(text, prefix = "/") {
     return { action: "help", comandoUsado };
   }
   if (
-    ["girar", "spin", "rodar", "run", "grelhar", "criar", "nova", "novas", "create"].includes(
-      sub
-    )
+    [
+      "gerar",
+      "cupom",
+      "cupons",
+      "girar",
+      "spin",
+      "rodar",
+      "run",
+      "grelhar",
+      "criar",
+      "nova",
+      "novas",
+      "create",
+    ].includes(sub)
   ) {
     return {
       action: "criar",
       comandoUsado,
       quantidade: extrairQuantidade(tokens[1]),
     };
-  }
-  if (["txt", "ler", "arquivo"].includes(sub)) {
-    return { action: "txt", comandoUsado };
-  }
-  if (["contas", "lista", "listar", "status"].includes(sub)) {
-    return { action: "contas", comandoUsado };
   }
   if (["add", "adicionar", "importar"].includes(sub)) {
     return { action: "add", comandoUsado, argTexto };
@@ -517,7 +517,7 @@ async function processarContaGrelha(conta, { onLog } = {}) {
   });
 }
 
-function formatarRelatorioGiro(resultados, caminhoTxt) {
+function formatarRelatorioGiro(resultados) {
   let ok = 0;
   let jaGirou = 0;
   let erros = 0;
@@ -533,14 +533,11 @@ function formatarRelatorioGiro(resultados, caminhoTxt) {
     } else {
       erros += 1;
     }
-    const authTag = r.metodoAuth ? ` [${r.metodoAuth}]` : "";
-    return `${i + 1}. ${icone} *${r.conta}*${authTag}\n   ${r.resumo}`;
+    return `${i + 1}. ${icone} *${r.conta}*\n   ${r.resumo}`;
   });
 
-  const relArq = path.relative(process.cwd(), caminhoTxt);
   return [
-    `🔥 *Resultado Grelha BK* (${resultados.length} conta(s))`,
-    `📄 Arquivo: \`${relArq}\``,
+    `🍔 *Resultado Grelha BK* (${resultados.length} cupom(ns))`,
     "",
     ...linhas,
     "",
@@ -754,11 +751,10 @@ async function girarContaDisponivelDoPool({
   chavesJaUsadas = new Set(),
 } = {}) {
   const candidatos = coletarCandidatosPool(arquivoTxt).filter(
-    (item) => !chavesJaUsadas.has(item.conta.chave)
+    (item) => !item.jaGirouHoje && !chavesJaUsadas.has(item.conta.chave)
   );
   if (candidatos.length === 0) return null;
 
-  let melhorJaGirou = null;
   for (const { conta } of candidatos) {
     try {
       if (!girar) {
@@ -775,34 +771,17 @@ async function girarContaDisponivelDoPool({
       }
 
       const res = await processarContaGrelha(conta, { onLog: log });
+      chavesJaUsadas.add(conta.chave);
       if (res.status === "sucesso") {
-        chavesJaUsadas.add(conta.chave);
         return {
           ...res,
           metodoAuth: `${res.metodoAuth || "refresh_token"}+pool`,
         };
       }
-      if (
-        res.status === "ja_girou" &&
-        (res.cupom || res.premio) &&
-        (!melhorJaGirou || (!melhorJaGirou.cupom && res.cupom))
-      ) {
-        melhorJaGirou = {
-          ...res,
-          chavePool: conta.chave,
-          metodoAuth: `${res.metodoAuth || "refresh_token"}+pool`,
-        };
-      }
     } catch (errPool) {
-      log(`Conta do pool (${conta.chave}) indisponivel no fallback: ${errPool.message}`);
+      chavesJaUsadas.add(conta.chave);
+      log(`Conta do pool (${conta.chave}) indisponivel: ${errPool.message}`);
     }
-  }
-
-  if (melhorJaGirou) {
-    const chave = melhorJaGirou.chavePool;
-    delete melhorJaGirou.chavePool;
-    if (chave) chavesJaUsadas.add(chave);
-    return melhorJaGirou;
   }
 
   return null;
@@ -818,19 +797,32 @@ async function executarCriarContasBk({
   const send = typeof onOutput === "function" ? onOutput : async () => {};
   const qtd = Math.max(1, Math.min(10, Number(quantidade) || 1));
 
-  await send(
-    `🧪 Criando conta descartável no Mail.tm e girando a Grelha BK (*${qtd}*)...`
-  );
+  await send(`🍔 Gerando cupom na Grelha BK (*${qtd}*)...`);
 
   const resultados = [];
+  const chavesJaUsadas = new Set();
 
   for (let i = 0; i < qtd; i += 1) {
     let email = null;
     let senha = "BkGrelha2024@";
     const cpf = gerarCPF();
-    const logFn = (msg) => console.log(`[BK-Criar][${email || `#${i + 1}`}] ${msg}`);
+    const logFn = (msg) => console.log(`[BK-Gerar][${email || `#${i + 1}`}] ${msg}`);
 
     try {
+      if (girar) {
+        const giroPool = await girarContaDisponivelDoPool({
+          arquivoTxt,
+          girar: true,
+          log: logFn,
+          chavesJaUsadas,
+        });
+        if (giroPool) {
+          resultados.push(giroPool);
+          await enviarMidiasResultado(send, giroPool);
+          continue;
+        }
+      }
+
       const criado = await criarEmailTemporarioBk(senha);
       email = criado.email;
       senha = criado.senha || criado.senhaMailbox || senha;
@@ -842,6 +834,7 @@ async function executarCriarContasBk({
         senha,
         cpf,
       };
+      chavesJaUsadas.add(conta.chave);
 
       if (girar) {
         const giro = await processarContaGrelha(conta, { onLog: logFn });
@@ -870,12 +863,12 @@ async function executarCriarContasBk({
         });
       }
     } catch (err) {
-      logFn(`Falha ao criar/girar conta: ${err?.message || "Erro desconhecido"}`);
+      logFn(`Falha ao gerar cupom: ${err?.message || "Erro desconhecido"}`);
       resultados.push({
-        conta: email || `Nova conta #${i + 1}`,
+        conta: email || `Cupom #${i + 1}`,
         status: "erro",
         metodoAuth: null,
-        resumo: err?.message || "Erro ao criar/autenticar conta",
+        resumo: err?.message || "Erro ao gerar cupom",
         premio: null,
         cupom: null,
       });

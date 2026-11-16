@@ -832,17 +832,12 @@ async function handleMessage(sock, message) {
       return;
     }
 
-    // /bk | /grelha [girar [qtd] | criar [qtd] | txt | contas | add | help]
+    // /bk | /grelha [gerar [qtd] | help]
     if (bkData) {
       if (!(await checkCommandAccess("bk"))) return;
 
       if (bkData.action === "help") {
         await sendTextWithLog(sock, from, buildBkHelpMessage(PREFIX));
-        return;
-      }
-
-      if (bkData.action === "contas") {
-        await sendTextWithLog(sock, from, listarContasStatus());
         return;
       }
 
@@ -852,11 +847,7 @@ async function handleMessage(sock, message) {
         return;
       }
 
-      if (
-        bkData.action === "girar" ||
-        bkData.action === "criar" ||
-        bkData.action === "txt"
-      ) {
+      if (bkData.action === "girar" || bkData.action === "criar") {
         if (runningByChat.has(from)) {
           await sendTextWithLog(
             sock,
@@ -876,17 +867,11 @@ async function handleMessage(sock, message) {
 
         runningByChat.add(from);
         try {
-          if (bkData.action === "txt") {
-            await executarGiroGrelha({
-              onOutput: enviarSaidaBk,
-            });
-          } else {
-            await executarCriarContasBk({
-              quantidade: bkData.quantidade || 1,
-              girar: true,
-              onOutput: enviarSaidaBk,
-            });
-          }
+          await executarCriarContasBk({
+            quantidade: bkData.quantidade || 1,
+            girar: true,
+            onOutput: enviarSaidaBk,
+          });
         } catch (error) {
           console.error("Erro no /bk:", error);
           await sendTextWithLog(
