@@ -21,6 +21,30 @@ function carregarEnv() {
 }
 carregarEnv();
 
+function silenciarLogsLibsignal() {
+  const padroesRuidosos = [
+    /^Session error:/,
+    /^Failed to decrypt message with any known session/,
+    /^Closing session:/,
+    /^Opening session:/,
+    /^Closing open session in favor of incoming prekey bundle/,
+    /^Removing old closed session:/,
+  ];
+  const deveIgnorar = (args) => {
+    const primeiro = typeof args[0] === "string" ? args[0] : "";
+    return padroesRuidosos.some((rx) => rx.test(primeiro));
+  };
+
+  for (const metodo of ["log", "warn", "error"]) {
+    const original = console[metodo].bind(console);
+    console[metodo] = (...args) => {
+      if (deveIgnorar(args)) return;
+      original(...args);
+    };
+  }
+}
+silenciarLogsLibsignal();
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -1072,8 +1096,8 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     ...(version ? { version } : {}),
     auth: state,
-    // Logger em warn para registrar falhas de descriptografia/reconexão sem poluir
-    logger: pino({ level: "warn" }),
+    // Logger silencioso — mude para 'info' ou 'debug' se quiser mais detalhes
+    logger: pino({ level: "silent" }),
     printQRInTerminal: false, // exibimos manualmente via qrcode-terminal
     browser: [nomeConexao, "Chrome", "1.0.0"],
     syncFullHistory: false,
@@ -1154,14 +1178,6 @@ async function connectToWhatsApp() {
   // Cada mensagem roda em paralelo: um comando demorado (puppeteer etc.)
   // não trava mais a fila de todos os outros comandos.
   sock.ev.on("messages.upsert", ({ messages, type }) => {
-    for (const msg of messages || []) {
-      const jid = msg.key?.remoteJid || "?";
-      if (!isJidBroadcast(jid)) {
-        console.log(
-          `[UPSERT] type=${type} jid=${jid} fromMe=${Boolean(msg.key?.fromMe)} hasMsg=${Boolean(msg.message)} ts=${msg.messageTimestamp || 0}`
-        );
-      }
-    }
     if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
       handleMessage(sock, msg).catch((error) =>
