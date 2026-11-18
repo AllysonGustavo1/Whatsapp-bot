@@ -743,11 +743,14 @@ function coletarCandidatosPool(arquivoTxt) {
       (sessao?.accessToken &&
         !tokenEstaExpirado(sessao.accessToken, 90) &&
         (sessao.customerId || c.customerId));
-    if (!refresh && !accessValido) continue;
+    const temToken = Boolean(refresh || accessValido);
+    const podeAutenticarMailTm = Boolean(c.email && c.senha);
+    if (!temToken && !podeAutenticarMailTm) continue;
     chavesVistas.add(c.chave);
     candidatos.push({
       conta: c,
       sessao,
+      temToken,
       jaGirouHoje: foiGiradaHoje(sessao),
       atualizadoTs: Date.parse(sessao?.atualizadoEm || 0) || 0,
     });
@@ -777,6 +780,7 @@ function coletarCandidatosPool(arquivoTxt) {
         refreshToken: sessao.refreshToken || null,
       },
       sessao,
+      temToken: true,
       jaGirouHoje: foiGiradaHoje(sessao),
       atualizadoTs: Date.parse(sessao.atualizadoEm || 0) || 0,
     });
@@ -784,6 +788,9 @@ function coletarCandidatosPool(arquivoTxt) {
 
   candidatos.sort((a, b) => {
     if (a.jaGirouHoje !== b.jaGirouHoje) return a.jaGirouHoje ? 1 : -1;
+    if (Boolean(a.temToken) !== Boolean(b.temToken)) {
+      return a.temToken ? -1 : 1;
+    }
     return b.atualizadoTs - a.atualizadoTs;
   });
 
@@ -810,10 +817,11 @@ async function girarContaDisponivelDoPool({
       log(
         `Tentando conta existente do pool: ${conta.email || conta.chave} (ultimo giro: ${sessao?.ultimoGiroEm || "nunca"})...`
       );
+      const precisaSoCache = !(conta.email && conta.senha);
       if (!girar) {
         const creds = await obterCredenciaisAtivas(conta, {
           onLog: log,
-          apenasTokenCache: true,
+          apenasTokenCache: precisaSoCache,
         });
         chavesJaUsadas.add(conta.chave);
         return {
@@ -828,7 +836,7 @@ async function girarContaDisponivelDoPool({
 
       const res = await processarContaGrelha(conta, {
         onLog: log,
-        apenasTokenCache: true,
+        apenasTokenCache: precisaSoCache,
       });
       chavesJaUsadas.add(conta.chave);
       if (res.status === "sucesso") {
