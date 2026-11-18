@@ -339,6 +339,15 @@ async function enviarMidiasResultado(send, giro, { incluirConta = false } = {}) 
   }
 }
 
+function ehCampanhaInativa(status, texto) {
+  return (
+    status === 404 ||
+    /campaign not found|campanha n[aã]o encontrada|no active campaign/i.test(
+      String(texto || "")
+    )
+  );
+}
+
 async function processarContaGrelha(
   conta,
   { onLog, apenasTokenCache = false } = {}
@@ -399,15 +408,12 @@ async function processarContaGrelha(
   }
 
   const getDetalhes = extrairDetalhesPremio(getRes.data);
-  if (getRes.status === 404) {
-    const resumo = formatarResultadoGrelha(null, getRes);
-    salvarSessaoConta(conta.chave, {
-      ultimoGiroEm: new Date().toISOString(),
-      ultimoResultado: resumo,
-    });
+  if (getRes.status === 404 || ehCampanhaInativa(getRes.status, getRes.raw)) {
+    const resumo = "Não há campanha ativa da Grelha BK no momento.";
     return {
       conta: label,
       status: "erro",
+      campanhaInativa: true,
       metodoAuth: creds.metodoAuth,
       resumo,
       premio: null,
@@ -502,7 +508,11 @@ async function processarContaGrelha(
     }
   }
 
-  const resumo = formatarResultadoGrelha(postRes, getRes);
+  const resumoRaw = formatarResultadoGrelha(postRes, getRes);
+  const campanhaInativa = ehCampanhaInativa(postRes.status, resumoRaw);
+  const resumo = campanhaInativa
+    ? "Não há campanha ativa da Grelha BK no momento."
+    : resumoRaw;
 
   const statusLogico =
     postRes.status >= 200 && postRes.status < 300
@@ -512,13 +522,15 @@ async function processarContaGrelha(
         ? "ja_girou"
         : "erro";
 
-  salvarSessaoConta(conta.chave, {
-    ultimoGiroEm: new Date().toISOString(),
-    ultimoResultado: resumo,
-    ultimoCupom: postDetalhes.couponCode || getDetalhes.couponCode || null,
-  });
+  if (!campanhaInativa) {
+    salvarSessaoConta(conta.chave, {
+      ultimoGiroEm: new Date().toISOString(),
+      ultimoResultado: resumo,
+      ultimoCupom: postDetalhes.couponCode || getDetalhes.couponCode || null,
+    });
+  }
 
-  return montarResultadoGiro({
+  const resultado = await montarResultadoGiro({
     label,
     status: statusLogico,
     metodoAuth: creds.metodoAuth,
@@ -529,6 +541,7 @@ async function processarContaGrelha(
     conta,
     log,
   });
+  return campanhaInativa ? { ...resultado, campanhaInativa: true } : resultado;
 }
 
 function formatarRelatorioGiro(
@@ -827,6 +840,12 @@ async function girarContaDisponivelDoPool({
           metodoAuth: `${res.metodoAuth || "refresh_token"}+pool`,
         };
       }
+      if (res.campanhaInativa) {
+        log(
+          `[CAMPANHA-INATIVA] Conta ${conta.email || conta.chave} informou sem campanha ativa; interrompendo tentativas.`
+        );
+        return res;
+      }
       log(
         `Conta do pool (${conta.email || conta.chave}) retornou status=${res.status} (${res.resumo}), tentando proxima...`
       );
@@ -906,6 +925,14 @@ async function executarGerarCuponsBk({
             `[NOVA-FALHOU] Conta ${email} terminou com status=${giro.status}: ${giro.resumo}`
           );
         }
+      }
+
+      if (giro?.campanhaInativa) {
+        await send("⚠️ Não há campanha ativa da Grelha BK no momento.");
+        return {
+          resultados: [giro],
+          relatorio: "⚠️ Não há campanha ativa da Grelha BK no momento.",
+        };
       }
 
       if (giro.status === "sucesso") {
