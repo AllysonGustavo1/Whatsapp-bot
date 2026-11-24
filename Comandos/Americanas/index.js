@@ -36,6 +36,7 @@ function buildAmericanasHelpMessage() {
     "• `/americanas criar conta` (cria 1 conta usando seu perfil salvo ou dados automáticos)",
     "• `/americanas criar conta 2` (cria 2 contas)",
     '• `/americanas criar conta contas=2 nome="Carlos Eduardo"` (cria contas com override)',
+    "• `🏠 O checkout já sai pré-preenchido (perfil + endereço fictícios salvos como padrão)`",
     "",
     "🔹 *Limpar Contas Resgatadas:*",
     "• `/americanas limpar resgatados` (remove automaticamente as contas já retiradas)",

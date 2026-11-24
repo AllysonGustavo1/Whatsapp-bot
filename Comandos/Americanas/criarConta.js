@@ -9,6 +9,7 @@ const {
   gerarSenhaForte,
   gerarDataNascimento,
   gerarSexo,
+  gerarEndereco,
 } = require("./utils/generators");
 
 /**
@@ -70,6 +71,10 @@ async function executarCriarConta({
     const sexoFinal = options.sexo || perfilUsuario.sexo || gerarSexo();
     const cpfFinal = options.cpf || perfilUsuario.cpf || gerarCPF();
     const telefoneFinal = options.telefone || perfilUsuario.telefone || gerarTelefone();
+    const enderecoFinal = gerarEndereco({
+      cep: options.cep || perfilUsuario.cep || null,
+      rua: options.endereco || null,
+    });
 
     try {
       await emitir(`⏳ ${prefixoLog} Criando e-mail temporário e solicitando código na Americanas...`);
@@ -83,6 +88,7 @@ async function executarCriarConta({
           telefone: telefoneFinal,
           nascimento: nascimentoFinal,
           sexo: sexoFinal,
+          endereco: enderecoFinal,
         },
         onProgress: async ({ step, info }) => {
           if (step === "email_code_received") {
@@ -109,7 +115,8 @@ async function executarCriarConta({
         `🔑 *Senha:* \`${conta.password}\`\n` +
         `👤 *Nome:* ${conta.profile?.firstName || ""} ${conta.profile?.lastName || ""}\n` +
         `📄 *CPF:* ${conta.profile?.document || cpfFinal}\n` +
-        `📱 *Tel:* ${conta.profile?.phone || telefoneFinal}`
+        `📱 *Tel:* ${conta.profile?.phone || telefoneFinal}\n` +
+        `🏠 *Endereço (checkout pré-preenchido):* ${conta.profile?.address?.street || ""}, ${conta.profile?.address?.number || ""} - ${conta.profile?.address?.city || ""}/${conta.profile?.address?.state || ""}`
       );
 
       if (i < count) {

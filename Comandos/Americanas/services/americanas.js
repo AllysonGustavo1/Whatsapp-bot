@@ -316,6 +316,7 @@ async function saveAddressGraphQL(jar, address) {
       country: address.country || "BRA",
       receiverName: address.receiverName || "Destinatario",
       complement: address.complement || null,
+      isDefault: true,
     },
   };
 
@@ -400,6 +401,29 @@ async function updateShippingData(jar, address) {
   );
 
   return res.data;
+}
+
+/**
+ * Reaplica os dados fictícios (perfil + endereço) salvos da conta no orderForm
+ * atual. Deixa o checkout pré-preenchido para compras futuras.
+ */
+async function reaplicarCheckoutDados({ email, password, profile, address }) {
+  const jar = new CookieJar();
+  await startLogin(jar, email);
+  const loginRes = await validateLogin(jar, email, password);
+  if (!loginRes.success) {
+    throw new Error(`Falha no login da conta ${email}`);
+  }
+  await refreshSession(jar);
+
+  if (profile) {
+    await updateClientProfile(jar, profile);
+  }
+  if (address) {
+    await updateShippingData(jar, address);
+  }
+
+  return { email, perfilAplicado: Boolean(profile), enderecoAplicado: Boolean(address) };
 }
 
 function formatarDataIso(raw) {
@@ -862,6 +886,7 @@ module.exports = {
   refreshSession,
   criarContaCompleta,
   consultarPedidosConta,
+  reaplicarCheckoutDados,
   fetchOrdersList,
   fetchOrder,
   fetchTakeoutToken,

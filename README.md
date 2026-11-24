@@ -55,7 +55,7 @@ Módulo completo e 100% autônomo (não depende de pastas externas) para automat
 - `/americanas pedidos email:senha` — consulta uma conta avulsa enviada na hora.
 
 #### 2. Criar Contas (`/americanas criar conta`)
-Cria e-mail temporário via Mail.tm, recebe código VTEX de 6 dígitos, define senha e preenche perfil completo (Nome, CPF válido, Telefone, Nascimento, Sexo e Endereço para liberação de Checkout):
+Cria e-mail temporário via Mail.tm, recebe código VTEX de 6 dígitos, define senha e preenche perfil completo (Nome, CPF válido, Telefone, Nascimento, Sexo e Endereço para liberação de Checkout). O perfil e o endereço fictícios ficam salvos na conta e no checkout — ao comprar, os dados já vêm pré-preenchidos.
 - `/americanas criar conta` — cria 1 conta usando seu perfil salvo (ou dados automáticos).
 - `/americanas criar conta 2` — cria 2 contas em lote.
 - `/americanas criar conta contas=2 nome="Carlos Silva" senha="MinhaSenha123"` — cria com campos específicos.

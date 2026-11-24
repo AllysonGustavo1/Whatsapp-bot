@@ -87,6 +87,7 @@ function salvarContaUsuario(ownerId, dadosConta) {
     password: dadosConta.password,
     userId: dadosConta.userId || null,
     profile: dadosConta.profile || null,
+    address: dadosConta.profile?.address || dadosConta.address || null,
     mailPassword: dadosConta.mailPassword || null,
     criadoEm: dadosConta.criadoEm || new Date().toISOString(),
     atualizadoEm: new Date().toISOString(),
