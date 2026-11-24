@@ -140,6 +140,13 @@ async function resolverRecaptchaRegistro({ onLog, onResolvido } = {}) {
   const executablePath = await obterCaminhoChrome();
   log(`Iniciando navegador em modo stealth: ${executablePath || "Padrão Puppeteer"}`);
 
+  // Se não encontrou Chrome/Edge nos caminhos padrões, tenta usar o Puppeteer management
+  let effectiveExecutablePath = executablePath;
+  if (!effectiveExecutablePath) {
+    log("⚠️ Chrome/Edge não encontrado nos caminhos padrão. Tentando usar o Puppeteer management...");
+    // O Puppeteer baixará seu próprio Chrome se necessário
+  }
+
   const launchOptions = {
     headless: "new",
     args: [
@@ -158,30 +165,44 @@ async function resolverRecaptchaRegistro({ onLog, onResolvido } = {}) {
     ],
   };
 
-  if (executablePath) {
-    launchOptions.executablePath = executablePath;
+  if (effectiveExecutablePath) {
+    launchOptions.executablePath = effectiveExecutablePath;
   }
 
   let browser;
   try {
     browser = await puppeteer.launch(launchOptions);
   } catch (errLaunch) {
+    // Se no Linux e falhar, tenta instalar Chrome
     if (process.platform === "linux") {
       log("Tentando instalar o Google Chrome oficial via setup de ambiente...");
       try {
         const { garantirAmbientePronto } = require("../../../../scripts/setup-ambiente");
         await garantirAmbientePronto();
         const novoCaminho = await obterCaminhoChrome();
-        if (novoCaminho) launchOptions.executablePath = novoCaminho;
-        browser = await puppeteer.launch(launchOptions);
+        if (novoCaminho) {
+          launchOptions.executablePath = novoCaminho;
+          browser = await puppeteer.launch(launchOptions);
+        } else {
+          throw new Error(
+            "Chrome não encontrado após tentativa de instalação automática.\n" +
+            "Instale o Chrome/Chromium manualmente ou defina PUPPETEER_EXECUTABLE_PATH."
+          );
+        }
       } catch (errAutoInstall) {
         throw new Error(
-          `Não foi possível iniciar o Chrome no servidor: ${errLaunch.message}.\n` +
-          `Execute no terminal do Ubuntu:\n` +
-          `chmod +x setup.sh && ./setup.sh`
+          `Não foi possível iniciar o Chrome no servidor: ${errLaunch.message}\n` +
+          `Erro ao tentar instalação automática: ${errAutoInstall.message}`
         );
       }
     } else {
+      // No Windows, verifica se o erro é por Chrome não encontrado
+      if (errLaunch.message && errLaunch.message.includes("Chrome")) {
+        throw new Error(
+          "Chrome/Edge não encontrado. O solver de reCAPTCHA requer o navegador Chrome/Edge.\n" +
+          "Instale o Chrome ou defina a variável de ambiente PUPPETEER_EXECUTABLE_PATH para o caminho do executável."
+        );
+      }
       throw new Error(`Não foi possível iniciar o navegador: ${errLaunch.message}`);
     }
   }

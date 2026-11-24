@@ -181,11 +181,18 @@ async function garantirAmbientePronto() {
         "[Setup] Módulos Python ausentes no Windows. Tentando pip install..."
       );
       try {
-        execSync("pip install soundfile SpeechRecognition", {
+        execSync("pip install --break-system-packages soundfile SpeechRecognition", {
           stdio: "inherit",
           timeout: 120000,
         });
       } catch (_) {}
+      // Verifica novamente após instalação
+      const audioOk2 = verificarPythonAudio();
+      if (audioOk2) {
+        console.log("[Setup] Dependências Python de áudio instaladas com sucesso!");
+      } else {
+        console.warn("[Setup] Dependências Python ainda não disponíveis após instalação.");
+      }
     } else {
       console.log("[Setup] Ambiente Windows verificado e pronto.");
     }
