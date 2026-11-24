@@ -234,12 +234,29 @@ async function validateLogin(jar, email, password) {
   };
 }
 
+async function initVtexSession(jar) {
+  await httpRequest(
+    `${BASE_URL}/api/sessions`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: BASE_URL,
+        referer: `${BASE_URL}/account`,
+      },
+      body: JSON.stringify({ public: {} }),
+    },
+    jar
+  );
+}
+
 async function refreshSession(jar) {
   await httpRequest(
     `${BASE_URL}/api/vtexid/pub/authentication/accesskey/send`,
     { method: "GET" },
     jar
   );
+  await initVtexSession(jar);
 }
 
 // ─── Cadastro de Perfil e Checkout ──────────────────────────────────────────
@@ -668,17 +685,20 @@ async function fetchOrder(orderId, jar) {
 
 async function fetchTakeoutToken(orderId, jar) {
   const url = `${BASE_URL}/_v/private/takeout-token/${encodeURIComponent(orderId)}`;
-  const res = await httpRequest(
-    url,
-    {
-      method: "GET",
-      headers: {
-        accept: "*/*",
-        referer: `${BASE_URL}/account`,
-      },
+  const requestOptions = {
+    method: "GET",
+    headers: {
+      accept: "*/*",
+      referer: `${BASE_URL}/account`,
     },
-    jar
-  );
+  };
+
+  let res = await httpRequest(url, requestOptions, jar);
+
+  if (res.status === 401) {
+    await initVtexSession(jar);
+    res = await httpRequest(url, requestOptions, jar);
+  }
 
   if (!res.ok) {
     return {
@@ -689,9 +709,15 @@ async function fetchTakeoutToken(orderId, jar) {
   }
 
   try {
-    const payload = typeof res.data === "object" ? res.data : JSON.parse(res.body);
+    const payload = typeof res.data === "object" && res.data !== null ? res.data : JSON.parse(res.body);
+    const rawToken = payload.takeoutToken;
+    const normalizedToken =
+      rawToken !== null && rawToken !== undefined && String(rawToken).trim()
+        ? String(rawToken).trim()
+        : null;
+
     return {
-      takeoutToken: typeof payload.takeoutToken === "string" ? payload.takeoutToken : null,
+      takeoutToken: normalizedToken,
       isReadyForPickup: typeof payload.isReadyForPickup === "boolean" ? payload.isReadyForPickup : null,
       requestError: null,
     };
